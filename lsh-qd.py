@@ -23,20 +23,25 @@ class AlphaMinhash():
                  t,
                  r,
                  seed=42):
+
         self.t, self.r = t, r
         self.seed = 42
+
         # We use the largest 32-bit integer as our maximum hash value, but
         # this could be changed without too much effort
         self.max_val = 2 ** 32 - 1
         self.p = 4294967311
+
         # Store each of hash function in an array of size (t, r). self.hash_functions[i][j]
         # indicates the j'th band of the i'th table
         self.hash_functions = [[self._generate_hash_function() for _ in range(self.r)]
                                for _ in range(self.t)]
+
         # This dictionary maps from a data index to a list of t bucket ids
         # indicating the keys in each hash table where the index can be found
         self.cur_data_idx = 0
         self.data_idx_to_bucket_ids = {}
+
         # This list stores t dictionaries, each of which maps from a hash value /
         # bucket id to each of the data indexes which have been hashed to that bucket
         self.tables = [defaultdict(list) for _ in range(self.t)]
@@ -66,20 +71,26 @@ class AlphaMinhash():
         nonzero_indexes = np.where(x == 1)[0]
         if len(nonzero_indexes) == 0:
             return
+
         all_bucket_ids = []
+
         # For each set of r bands...
         for hash_idx, bands in enumerate(self.hash_functions):
             # Compute the data point's signature under those hash functions, and its
             # corresponding bucket id
             signature = [np.min(function(nonzero_indexes)) for function in bands]
             bucket_id = hash(tuple(signature))
+
             # Add the data index to the current bucket
             self.tables[hash_idx][bucket_id].append(self.cur_data_idx)
             all_bucket_ids.append(bucket_id)
+
         # Associate the bucket ids with the current data point
         self.data_idx_to_bucket_ids[self.cur_data_idx] = all_bucket_ids
+
         # Increment the data index
         self.cur_data_idx += 1
+
         return all_bucket_ids
 
     def query(self, query_idx, alpha=1, threshold=0):
@@ -94,14 +105,18 @@ class AlphaMinhash():
         '''
         bucket_ids = self.data_idx_to_bucket_ids[query_idx]
         collision_freqs = defaultdict(int)
+
         for hash_idx, bucket_id in enumerate(bucket_ids):
             for data_index in self.tables[hash_idx][bucket_id]:
                 if data_index != query_idx:
                     collision_freqs[data_index] += 1
+
         filtered_collisions = [idx for idx, freq in collision_freqs.items() if freq >= alpha]
+
         if threshold > 0:
             # filtered_collisions = [idx for idx in filtered_collisions if jaccard()]
             pass
+            
         return filtered_collisions
 
 
