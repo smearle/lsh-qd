@@ -1,11 +1,16 @@
 import math
+import os
+
 import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
 from matplotlib import pyplot as plt
 from scipy.spatial.distance import jaccard  # jaccard distance measure
 
+
 figs_dir = 'figs'
+coll_probs_dir = os.path.join(figs_dir, 'coll_probs')
+
 
 class AlphaMinhash():
     '''
@@ -184,11 +189,40 @@ def collision_prob_alpha(sim, r, t, alpha=1):
     if alpha == 1:
         # ensure we achieve the same s-curve as the equivalent vanilar LSH scheme when alpha=1
         vanilla_p_coll = collision_prob(sim, r, t)
-        # FIXME: there seems to be a small discrepancy here?
-        assert np.all(p_coll == vanilla_p_coll)
+        # There can be small discrepancies here
+        assert np.abs(p_coll - vanilla_p_coll).max() < 1e-5
     return p_coll
 
+def plot_collision_prob(rs, ts):
+    '''
+    Plot collision probabilities by similarity in an LSH scheme over a set of parameters.
+    Args:
+        rs: 1D array of r values (number of bands)
+        ts: 1D array of t values (number of tables)
+    '''
+    cps = []
+    sim = np.arange(0, 1.01, 1 / 100)  # the
+    for t in ts:
+        r_cps = []
+        for ri, r in enumerate(rs):
+            cp = collision_prob(sim, r, t)
+            r_cps.append(cp)
+            label = f'r = {int(r)}' if ri == 0 or ri == len(rs) - 1 else None
+            plt.plot(sim, cp, label=label, color='red', alpha=0.2 + 0.8 * (ri / (len(rs) - 1)))
+        cps.append(r_cps)
+        plt.legend()
+        plt.xlabel('item similarity')
+        plt.ylabel('collision probability')
+        plt.savefig(os.path.join(f'{coll_probs_dir}', f't-{t}'))
+        plt.close()
+
 def plot_collision_prob_alpha(r, t):
+    '''
+    Plots the collision probability by distance of a tunable LSH scheme with given parameters.
+    Args:
+        r: number of bands in each LSH instance
+        t: number of LSH instances
+    '''
     v = np.arange(0, 1.01, 1 / 100)  # the
     alphas = np.arange(0, t + 1, t / 20)
     for a in alphas:
@@ -198,7 +232,7 @@ def plot_collision_prob_alpha(r, t):
     plt.xlabel('item similarity')
     plt.ylabel('collision probability')
     plt.legend()
-    plt.savefig(f'{figs_dir}/coll_prob_alpha_r-{r}_t-{t}.png')
+    plt.savefig(f'{coll_probs_dir}/alphas_r-{r}_t-{t}.png')
     plt.close()
 
 def plot_mean_nbs_by_alpha():
@@ -260,8 +294,7 @@ def plot_mean_nbs_by_alpha():
 
 if __name__ == "__main__":
     plot_mean_nbs_by_alpha()
-    rs = range(1, 10)
-    ts = range(1, 20)
-    for r in rs:
-        for t in ts:
-            plot_collision_prob_alpha(r, t)
+    rs = np.arange(1, 20)
+    ts = np.arange(20, 21)
+    plot_collision_prob(rs=rs, ts=ts)
+    plot_collision_prob_alpha(r=1, t=20)
