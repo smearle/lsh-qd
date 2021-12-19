@@ -2,6 +2,7 @@ import math
 import os
 
 import numpy as np
+from scipy import integrate
 from tqdm import tqdm
 from collections import defaultdict
 from matplotlib import pyplot as plt
@@ -242,6 +243,7 @@ class pStableHash(LocalitySensitiveHash):
         b = np.random.random() * self.r
 
         def hash_func(x):
+            # Project the item to a line and discretize the line into buckets; return bucket id
             return math.floor((x.T @ a + b) / self.r)
 
         return hash_func
@@ -259,8 +261,8 @@ class pStableHash(LocalitySensitiveHash):
 
 class AlphaLSH(object):
     '''
-    An implementation of the MinHash algorithm for approximate nearest
-    neighbors on binary strings, designed for use in niching and QD. In
+    An extension of LSH algorithms for approximate nearest
+    neighbors, designed for use in niching and QD. In
     addition to the typical parameters of # of tables and # of bands, this
     also accepts an alpha parameter when querying. An item in the database
     is returned only if it is hashed into the same bucket as the query in
@@ -344,7 +346,7 @@ class AlphaLSHContainer():
         return self.lsh.query_idx(data_idx, alpha=alpha)
 
     def query(self, x, alpha=1, threshold=0):
-        return self.lsh.query_idx(x, alpha=alpha)
+        return self.lsh.query(x, alpha=alpha)
 
 
 def collision_prob(sim, k, l):
@@ -388,6 +390,54 @@ def collision_prob_alpha(sim, k, l, alpha=1):
 
     return p_coll
 
+def collision_prob_pstable(dists, k, l, r, f_G):
+    '''
+    Args:
+        sim:
+        k: number of projections (bands)
+        l: number of hash tables
+        r: the width of the buckets in the projections
+    Returns:
+        an integer or 1D vector of collision probabilities in [0, 1]
+    '''
+    x_res = 1000
+    p_projs = np.empty(len(dists))
+
+    assert dists[0] == 0
+    p_projs[0] = 1
+    for di, d in enumerate(dists[1:]):
+        result = integrate.quad(lambda t: (1 / d) * f_G(t / d) * (1 - (t / r)), 0, r)
+        p_proj = 2 * result[0]
+        p_projs[di+1] = p_proj
+
+    coll_probs = collision_prob(sim=p_projs, k=k, l=l)
+
+    return coll_probs
+
+
+def plot_collision_prob_pstable(ks, ls, rs):
+
+    # d = np.linspace(-2, 2, 100)
+    #
+    def f_G(x):
+        return np.exp(-x**2/2) / math.sqrt(2*math.pi)
+    # f_G_d = f_G(d)
+    # plt.plot(d, f_G_d)
+    # plt.show()
+
+    dists = np.linspace(0, 4, 100)
+    for li, l in enumerate(ls):
+        for ri, r in enumerate(rs):
+            for ki, k in enumerate(ks):
+                coll_probs = collision_prob_pstable(dists, k, l, r, f_G)
+                label = f'k = {round(k, 2)}' if ki == 0 or ki == len(ks) - 1 else None
+                plt.plot(dists, coll_probs, label=label, color='blue', alpha=1 - 0.8 * (len(ks) - ki) / len(ks))
+            plt.xlabel('item distances')
+            plt.ylabel('collision probability')
+            plt.legend()
+            plt.savefig(os.path.join(f'{coll_probs_dir}', f'pstable_l-{l}_r-{r}'))
+            plt.close()
+
 def plot_collision_prob(ks, ls):
     '''
     Plot collision probabilities by similarity in an LSH scheme over a set of parameters.
@@ -397,13 +447,16 @@ def plot_collision_prob(ks, ls):
     '''
     cps = []
     sim = np.arange(0, 1.01, 1 / 100)  # the
+
     for l in ls:
         l_cps = []
+
         for ki, k in enumerate(ks):
             cp = collision_prob(sim, k, l)
             l_cps.append(cp)
             label = f'k = {int(k)}' if ki == 0 or ki == len(ks) - 1 else None
             plt.plot(sim, cp, label=label, color='red', alpha=0.2 + 0.8 * (ki / (len(ks) - 1)))
+
         cps.append(l_cps)
         plt.legend()
         plt.xlabel('item similarity')
@@ -420,10 +473,12 @@ def plot_collision_prob_alpha(k, l):
     '''
     v = np.arange(0, 1.01, 1 / 100)  # the
     alphas = np.arange(0, l + 1, l / 20)
+
     for a in alphas:
         p_coll = collision_prob_alpha(v, k, l, alpha=a)
         label = f'alpha = {int(a)}' if a == alphas[0] or a == alphas[-1] else None
         plt.plot(v, p_coll, label=label, color='blue', alpha=0.2 + 0.8 * (a / (alphas[-1] - alphas[0])))
+
     plt.xlabel('item similarity')
     plt.ylabel('collision probability')
     plt.legend()
@@ -450,43 +505,104 @@ def gen_uni_rand_data_real(n_data, n_dims):
         n_data: number of data points
         n_dims: number of features
     Returns:
-        a 2D (n_data, dims) numpy array of data
+        data: a 2D (n_data, dims) numpy array of data
     '''
     data = np.random.random((n_data, n_dims))
     data = (data - 0.5) * 2
 
     return data
 
+def gen_planted_rand_data_real(query_data, n_data, R, epsilon):
+    '''
+    Args:
+        query_data: the 2D array of query points around which to adversarially construct our data
+        R: the radius of interest around each query point
+        epsilon: the annulus between R and R + epsilon is the annulus of disinterest
+    Returns:
+        data: a 2D (n_data, dims) numpy array of data
+    '''
+    n_dims = query_data.shape[1]
+    n_queries = query_data.shape[0]
+    n_nbs = n_queries
+    n_non_nbs = n_data - n_nbs
+
+    # generate random direction vectors to be projected to the surface of some sphere
+    data = np.random.normal(0, 1, (n_data, n_dims))
+
+    # randomly project each neighbor vector to the surface of a ball with uniformly random radius in [0, R]
+    # project non-neighbors to the annulus in [R, R+epsilon]
+    data = data / np.linalg.norm(data, axis=-1, keepdims=True)
+    # random radius sizes for each datapoint
+    radii = np.random.random(size=(n_data, 1))
+    radii[:n_nbs] *= R  # neighbor radii (of ball)
+    radii[n_nbs:] *= epsilon # non-neighbor radii (of annulus)
+    data[:n_nbs] *= radii[:n_nbs]  # neighbors are scaled by their radii to be inside ball
+    data[n_nbs:] = data[n_nbs:] * R + data[n_nbs] * radii[n_nbs:]  # non-neighbors are scaled by width of annulus then added to themselves
+                                                 # at the unit ball
+
+    # re-center the neihbors around each of the query points
+    data[:n_nbs] = data[:n_nbs] + query_data
+
+    # translate the non-neighbors to center around random query points
+    q_idxs = np.random.choice(n_queries, size=n_non_nbs)
+    # FIXME: some non-neighbors fall within the R-balls! Why?
+    data[n_nbs:] = data[n_nbs:] + query_data[q_idxs]
+
+    dists = np.linalg.norm(query_data[None, :, :] - data[:, None, :], axis=-1)
+
+    return data
+
+def plot_pairwise_dist(data):
+    dists = np.linalg.norm(data[None, :, :] - data[:, None, :], axis=-1)
+    n_buckets = 10
+    low, high = data.mean() - 1.0 * data.std(), data.mean() + 1.0 * data.std()
+    buck_size = (high - low) / n_buckets
+    ys = []
+    for i in range(n_buckets):
+        ys.append(np.sum(np.where((dists >= low + buck_size * i) & (dists < low + buck_size * (i + 1)))))
+
+    plt.plot(ys)
+    plt.savefig(os.path.join(f'{figs_dir}', 'planted_data_dist'))
+    plt.close()
+
+
 def plot_mean_nbs_by_alpha(scheme='MinHash'):
     '''
     Plot the effect of the LSH alpha parameter on the average neighborhood size and intra-neighborhood similarity in
-     neighborhoods returned by the LSH scheme.
+    neighborhoods returned by the LSH scheme.
     Args:
         scheme: which type of LSH scheme to use
     '''
     k = 1
     l = 12
     n_data = 100
-    n_dims = 1000
+    n_dims = 100
+    n_queries = 10
 
     if scheme == 'MinHash':
         lsh_container = AlphaLSHContainer(l=l, k=k)
         data = gen_uni_rand_data_bin(n_data, n_dims)
         similarity = lambda a, b: 1 - jaccard(a, b)
+        query_data = gen_uni_rand_data_bin(n_queries, n_dims)
 
     elif scheme == 'pStable':
         lsh_args = {
             'lsh_cls': pStableHash,
-            'n_dims': n_dims,
-        }
+            'n_dims': n_dims}
         lsh_container = AlphaLSHContainer(l=l, k=k, lsh_cls=AlphaLSH, lsh_args=lsh_args)
         data = gen_uni_rand_data_real(n_data, n_dims)
-        similarity = lambda a, b: ((a - b)**2).sum(axis=-1)  # Euclidean 2-norm
+        similarity = lambda a, b: - ((a - b)**2).sum(axis=-1)  # negative Euclidean 2-norm
+        query_data = gen_uni_rand_data_real(n_queries, n_dims)
+        epsilon = 1
+        query_data = gen_planted_rand_data_real(query_data, n_data, R=0.1, epsilon=0.1)
+        plot_pairwise_dist(data)
+
+    else:
+        raise Exception
 
     new_idxs = lsh_container.store(data)
+    n_data = data.shape[0]
     assert new_idxs == list(range(n_data))
-    n_queries = 10
-    q_idxs = np.random.choice(list(lsh_container.data.keys()), n_queries, replace=False)
     alphas = range(1, l)
     # TODO: Is this equivalent to just averaging over *all* alpha-neighborhoods in our container? Is there an easy way
     #   to collect all these neighborhoods?
@@ -499,8 +615,8 @@ def plot_mean_nbs_by_alpha(scheme='MinHash'):
         q_sims = []  # mean intra-neighborhood similarity for each query item
 
         # Try each query item
-        for q_idx in q_idxs:
-            nb_idxs = lsh_container.query_idx(q_idx, alpha=alpha)
+        for q in query_data:
+            nb_idxs = lsh_container.query(q, alpha=alpha)
             n_nbs = len(nb_idxs)
             mean_sim = np.mean([similarity(lsh_container.data[i], lsh_container.data[j]) for i in nb_idxs
                                for j in nb_idxs if i > j])
@@ -537,7 +653,16 @@ def plot_mean_nbs_by_alpha(scheme='MinHash'):
 if __name__ == "__main__":
     plot_mean_nbs_by_alpha(scheme='pStable')
     plot_mean_nbs_by_alpha(scheme='MinHash')
+
+    # Minhash collision probabilities
     ks = np.arange(1, 20)
     ls = np.arange(20, 21)
     plot_collision_prob(ks=ks, ls=ls)
     plot_collision_prob_alpha(k=1, l=20)
+
+    # p-stable collision probabilities
+    ks = np.arange(1, 20)
+    ls = np.arange(11, 21)
+    # rs = np.linspace(0, 4.01, 0.1)
+    rs = [1, 2, 3, 4]
+    plot_collision_prob_pstable(ks, ls, rs)
