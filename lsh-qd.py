@@ -649,8 +649,58 @@ def plot_mean_nbs_by_alpha(scheme='MinHash'):
     # print(f"Test index {test_idx} collides with {collision_idxs}")
     # print("Average Jaccard similarity of collisions:", np.mean([jaccard(data[test_idx], data[collision_idx]) for collision_idx in collision_idxs]))
 
+def get_k_l_minhash(posi_sim, false_sim, posi_rate=.90, false_rate=.10):
+    '''
+    Get LSH parameters to ensure a lower bound on false positives and upper bound on false negatives for items within
+    a given similarity threshold
+    Args:
+        posi_sim: similarity threshold to be considered a neighbor
+        false_sim: similarity threshold beyond which we want to guarantee low number of collisions
+        posi_rate: lower bound of probability of successfully identifying a true neighbor
+        false_rate: upper bound on probability of mistakenly identifying a false neighbor
+    Returns:
+        k: minimum number of bands required
+        l: minimum number of tables  required
+    '''
+    n_cell = 1000  # The range of values [1, n_cell+1] to check for r and t
+
+    # SimHash parameter search
+    # k is number of bands -- size of compressed representation produced by an LSH instance
+    # l is the number of LSH instances
+    r_idxs = np.arange(n_cell) + 1
+    t_idxs = np.arange(n_cell) + 1
+    k, l = np.meshgrid(r_idxs, t_idxs)
+
+    # Calculate chance of catching a true positive (false negative) above (below) a certain similarity threshold
+    # These are both (n_cell, n_cell)-shape grids representing probabilities over different parameters
+    p_tp = collision_prob(posi_sim, k, l)
+    p_fp = collision_prob(false_sim, k, l)
+
+    # We take the least parameters over these two dimensions (and assume them to also be the least of each).
+    valid_params = np.argwhere((p_tp >= posi_rate) & (p_fp <= false_rate)) + 1
+    print(posi_sim, false_sim)
+    k, l = valid_params[0]
+    assert k == valid_params[:, 0].min() and l == valid_params[:, 1].min()
+
+    print(k, l)
+
+    return k, l
+
+def get_ranked_neighb_params(inner_radii, param_fn):
+
+    # each near neighborhood is a ball, each anti-neighborhood is the complement of an err_width-larger ball
+    err_width = .1
+    p_sims = 1 - inner_radii
+    f_sims = np.array(inner_radii) - err_width
+    nb_params = [param_fn(posi_sim=p_sim, false_sim=f_sim) for p_sim, f_sim in zip(p_sims, f_sims)]
+
+    return nb_params
+
 
 if __name__ == "__main__":
+    radii = np.linspace(0.1, 0.5, 5)
+    nb_params = get_ranked_neighb_params(radii, get_k_l_minhash)
+
     plot_mean_nbs_by_alpha(scheme='pStable')
     plot_mean_nbs_by_alpha(scheme='MinHash')
 
