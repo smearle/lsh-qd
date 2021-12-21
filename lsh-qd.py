@@ -1,6 +1,7 @@
 import math
 import os
 
+import dists as dists
 import numpy as np
 from scipy import integrate
 from tqdm import tqdm
@@ -15,14 +16,12 @@ coll_probs_dir = os.path.join(figs_dir, 'coll_probs')
 
 class LocalitySensitiveHash():
     def __init__(self, k, l, seed=42):
-        '''
+        """
         A locality sensitive hashing scheme in the abstract.
         Args:
             k: number of bands per hash function
             l: number of hash functions/tables
-        '''
-
-
+        """
         self.k, self.l = k, l
         self.seed = seed
 
@@ -74,20 +73,20 @@ class LocalitySensitiveHash():
         return data_idx, all_bucket_ids
 
     def query(self, x, threshold=0):
-        '''
+        """
         Find the approximate near-neighbors of a given query item x.
         Args:
             x: the query item, a binary string
         Returns:
             nb_idxs (list(int)): a list of indices of items with which the query item collides ("neighbors")
-        '''
+        """
         collision_freqs = self._get_collision_freqs(x)
         nb_idxs = list(collision_freqs.keys())
 
         return nb_idxs
 
     def query_idx(self, query_idx, alpha=1):
-        '''
+        """
         Like query(), but assumes the item has already been hashed.Returns the indices of all hashed data points that
         collide with the item in at least alpha of the l tables.
 
@@ -100,20 +99,20 @@ class LocalitySensitiveHash():
             threshold: the minimum Jaccard similarity in order to return a match
         Returns:
             nb_idxs (:obj: `list` of :obj: `int`):
-        '''
+        """
         collision_freqs = self._get_collision_freqs_idx(query_idx)
         nb_idxs = list(collision_freqs.keys())
 
         return nb_idxs
 
     def _get_collision_freqs(self, x):
-        '''
+        """
         Args:
             x: (:obj: `np.array' of :obj: int)
         Returns:
             collision_freqs (dict{int: int})): a dictionary mapping the index of each neighbor to the number of buckets
                 in which it collided with the query item (always less than or equal to l, the # of total tables)
-        '''
+        """
         collision_freqs = defaultdict(int)
 
         for hash_idx, band_funcs in enumerate(self.hash_functions):
@@ -131,13 +130,13 @@ class LocalitySensitiveHash():
         return collision_freqs
 
     def _get_collision_freqs_idx(self, query_idx):
-        '''
+        """
         Gets the collision frequencies of an item with items already hashed to the scheme. Assumes the query item has
         already been hashed.
         Returns:
             collision_freqs (dict(int: int)): a dictionary mapping the index of each neighbor to the number of buckets
                 in which it collided with the query item (always less than or equal to l, the # of total tables)
-        '''
+        """
         bucket_ids = self.data_idx_to_bucket_ids[query_idx]
         collision_freqs = defaultdict(int)
 
@@ -342,21 +341,24 @@ class LSHContainer():
 
         return input_data_idxs
 
-    def query_idx(self, data_idx, alpha=1, threshold=0):
+    def query_idx(self, data_idx, alpha=1):
         return self.lsh.query_idx(data_idx, alpha=alpha)
 
     def query(self, x, **kwargs):
         return self.lsh.query(x, **kwargs)
 
 
+# TODO: either consolidate these container classes for different underlying LSH schemes, or bake appropriate
+#  "container_args" into each.
+
 class RankedNeighborContainer(object):
-    '''
+    """
     A container which preprocess datasets to be able to efficiently identify approximate nearest neighbors for multiple
     distance thresholds (i.e. within balls of varying radii around each query point), by using a
     differently-tuned vanilla LSH scheme for each ball.
-    '''
-    def __init__(self, inner_radii, container_args):
-        neighb_params = get_ranked_neighb_params(inner_radii, get_min_k_l_minhash)
+    """
+    def __init__(self, inner_radii, err_width, container_args):
+        neighb_params = get_ranked_neighb_params(inner_radii, err_width, get_min_k_l_minhash)
         for k, l in neighb_params:
             plot_collision_prob(ks=[k], ls=[l])
         self.neighb_containers = [LSHContainer(*n_params, **container_args) for n_params in neighb_params]
@@ -375,14 +377,23 @@ class RankedNeighborContainer(object):
         return [container.query(x) for container in self.neighb_containers]
 
 
+class RankedNeighborContainerPStable(RankedNeighborContainer):
+    def __init__(self, inner_radii, err_width, n_dims, container_args):
+        neighb_params = get_ranked_neighb_params(inner_radii, err_width, get_min_r_k_l_pstable)
+        for r, k, l in neighb_params:
+            plot_collision_prob_pstable(ks=[k], ls=[l], rs=[r])
+        self.neighb_containers = [LSHContainer(k=k, l=l, lsh_args={'r': r, 'n_dims': n_dims}, **container_args)
+                                  for r, k, l in neighb_params]
+
+
 class AlphaRankedNeighborContainer(object):
     '''
     A container which preprocess datasets to be able to efficiently identify approximate nearest neighbors for multiple
     distance thresholds (i.e. within balls of varying radii around each query point), by using a single alpha-tunable
     LSH scheme.
     '''
-    def __init__(self, inner_radii, container_args):
-        neighb_params = get_ranked_neighb_params_alpha(inner_radii, get_k_l_alpha_minhash)
+    def __init__(self, inner_radii, err_width, container_args):
+        neighb_params = get_ranked_neighb_params_alpha(inner_radii, err_width, get_k_l_alpha_minhash)
         k, l, alphas = neighb_params
         self.alphas = alphas
         self.neighb_container = LSHContainer(k=k, l=l, **container_args)
@@ -399,6 +410,14 @@ class AlphaRankedNeighborContainer(object):
             neighbs: iterable of iterables; set of items within each neighborhood
         '''
         return [self.neighb_container.query(x, alpha=a) for a in self.alphas]
+
+
+class AlphaRankedNeighborContainerPStable(AlphaRankedNeighborContainer):
+    def __init__(self, inner_radii, err_width, n_dims, container_args):
+        neighb_params = get_ranked_neighb_params_alpha(inner_radii, err_width, get_r_k_l_alpha_pstable)
+        r, k, l, alphas = neighb_params
+        self.alphas = alphas
+        self.neighb_container = LSHContainer(k=k, l=l, lsh_args={'r': r, 'lsh_cls': pStableHash, 'n_dims': n_dims}, **container_args)
 
 
 def collision_prob(sim, k, l):
@@ -428,45 +447,60 @@ def collision_prob_alpha(sim, k, l, alpha=1):
     Returns:
         an integer or 1D vector of collision probabilities in [0, 1]
     '''
-    p_coll = np.zeros(sim.shape)
-
-    for i in range(int(alpha), l + 1):
-        p_coll_i = math.comb(l, i) * (sim ** k) ** i * (1 - sim ** k) ** (l - i)
-        p_coll_i = p_coll_i.astype(np.float64)
-        p_coll += p_coll_i
 
     if alpha == 1:
 
         # Ensure we achieve the same s-curve as the equivalent vanilla LSH scheme when alpha=1
         vanilla_p_coll = collision_prob(sim, k, l)
+        p_coll = vanilla_p_coll
 
         # There can be small discrepancies here
-        assert np.abs(p_coll - vanilla_p_coll).max() < 1e-5
+        # assert np.abs(p_coll - vanilla_p_coll).max() < 1e-5
+
+    else:
+        p_coll = np.zeros(sim.shape)
+
+        for i in range(int(alpha), l + 1):
+            p_coll_i = math.comb(l, i) * (sim ** k) ** i * (1 - sim ** k) ** (l - i)
+            p_coll_i = p_coll_i.astype(np.float64)
+            p_coll += p_coll_i
+
 
     return p_coll
 
 
-def collision_prob_pstable(dists, k, l, r, f_G):
-    '''
+def f_G(x):
+    """
+    Gaussian distribution density function. Helper for calculating p-stable collision probability
+    Args:
+        x:
+    Returns:
+    """
+    return np.exp(-x**2/2) / math.sqrt(2*math.pi)
+
+
+def collision_prob_pstable(dists, r, k, l, alpha=1):
+    """
     Args:
         sim:
+        r: the width of the buckets in the projections
         k: number of projections (bands)
         l: number of hash tables
-        r: the width of the buckets in the projections
     Returns:
         an integer or 1D vector of collision probabilities in [0, 1]
-    '''
+    """
     x_res = 1000
     p_projs = np.empty(len(dists))
 
-    assert dists[0] == 0
-    p_projs[0] = 1
-    for di, d in enumerate(dists[1:]):
+    for di, d in enumerate(dists):
+        if d == 0:
+            p_projs[di] = 0
+            continue
         result = integrate.quad(lambda t: (1 / d) * f_G(t / d) * (1 - (t / r)), 0, r)
         p_proj = 2 * result[0]
-        p_projs[di+1] = p_proj
+        p_projs[di] = p_proj
 
-    coll_probs = collision_prob(sim=p_projs, k=k, l=l)
+    coll_probs = collision_prob_alpha(sim=p_projs, k=k, l=l, alpha=alpha)
 
     return coll_probs
 
@@ -475,8 +509,6 @@ def plot_collision_prob_pstable(ks, ls, rs):
 
     # d = np.linspace(-2, 2, 100)
     #
-    def f_G(x):
-        return np.exp(-x**2/2) / math.sqrt(2*math.pi)
     # f_G_d = f_G(d)
     # plt.plot(d, f_G_d)
     # plt.show()
@@ -485,7 +517,7 @@ def plot_collision_prob_pstable(ks, ls, rs):
     for li, l in enumerate(ls):
         for ri, r in enumerate(rs):
             for ki, k in enumerate(ks):
-                coll_probs = collision_prob_pstable(dists, k, l, r, f_G)
+                coll_probs = collision_prob_pstable(dists, r, k, l)
                 label = f'k = {round(k, 2)}' if ki == 0 or ki == len(ks) - 1 else None
                 plt.plot(dists, coll_probs, label=label, color='blue', alpha=1 - 0.8 * (len(ks) - ki) / len(ks))
             plt.xlabel('item distances')
@@ -587,48 +619,69 @@ def gen_uni_rand_data_real(n_data, n_dims):
     return data
 
 
-def gen_planted_rand_data_real(query_data, n_data, R, epsilon):
-    '''
+def gen_planted_rand_data_real(query_data, n_data, Rs, err_width, epsilon):
+    """
     Args:
         query_data: the 2D array of query points around which to adversarially construct our data
-        R: the radius of interest around each query point
-        epsilon: the annulus between R and R + epsilon is the annulus of disinterest
+        n_data (int): number of data-points to generate
+        Rs: the radii of interest around each query point, in ascending order
+        err_width (float): the annuli between each R and R + err_width is a grey-zone (between d1 and d2 in the LSH
+                           formulation); we don't guarantee that any points are placed here (though they may end up
+                           here nonetheless)
+        epsilon (float): the annulus between R + err_width and R + err_width + epsilon is the annulus of disinterest
+                        (greater than d2), which we are guaranteed to avoid to some degree
     Returns:
         data: a 2D (n_data, dims) numpy array of data
-    '''
+    """
+    assert Rs[-1] == np.max(Rs)
     n_dims = query_data.shape[1]
     n_queries = query_data.shape[0]
     n_nbs = n_queries
-    n_non_nbs = n_data - n_nbs
+    n_non_nbs = n_data - n_nbs * len(Rs)
 
     # generate random direction vectors to be projected to the surface of some sphere
     data = np.random.normal(0, 1, (n_data, n_dims))
 
     # randomly project each neighbor vector to the surface of a ball with uniformly random radius in [0, R]
-    # project non-neighbors to the annulus in [R, R+epsilon]
+    # project non-neighbors to the annulus in [R, R + err_width + epsilon]
     data = data / np.linalg.norm(data, axis=-1, keepdims=True)
     # random radius sizes for each datapoint
     radii = np.random.random(size=(n_data, 1))
-    radii[:n_nbs] *= R  # neighbor radii (of ball)
-    radii[n_nbs:] *= epsilon # non-neighbor radii (of annulus)
-    data[:n_nbs] *= radii[:n_nbs]  # neighbors are scaled by their radii to be inside ball
-    data[n_nbs:] = data[n_nbs:] * R + data[n_nbs] * radii[n_nbs:]  # non-neighbors are scaled by width of annulus then added to themselves
-                                                 # at the unit ball
 
-    # re-center the neihbors around each of the query points
-    data[:n_nbs] = data[:n_nbs] + query_data
+    # add neighbors to each annulus of interest
+    for ri, R in enumerate(Rs):
+
+        # Get the inner surface of the annulus of interest (0 for the first, smallest ball)
+        R0 = 0 if ri == 0 else Rs[ri-1]
+
+        ai = n_nbs * ri
+        bi = n_nbs * (ri + 1)
+        radii[ai:bi] *= (R - R0)  # neighor placement within annulus of interest
+        data[ai:bi] = data[ai:bi] * R0 + data[ai:bi] * radii[ai:bi]  # neighbors are scaled by their radii to be inside annulus
+
+        # re-center the neighbors around each of the query points
+        data[ai:bi] = data[ai:bi] + query_data
+
+    # add non-neighbors to be at least err_width away from largest (last) ball of interest
+    radii[bi:] *= epsilon # non-neighbor radii (of annulus)
+    data[bi:] = data[bi:] * (R + err_width) + data[bi:] * radii[bi:]  # non-neighbors are scaled by width of annulus then added to themselves
+                                                 # at the (R+err_width)-ball
 
     # translate the non-neighbors to center around random query points
     q_idxs = np.random.choice(n_queries, size=n_non_nbs)
-    # FIXME: some non-neighbors fall within the R-balls! Why?
-    data[n_nbs:] = data[n_nbs:] + query_data[q_idxs]
+    data[bi:] = data[bi:] + query_data[q_idxs]
 
-    dists = np.linalg.norm(query_data[None, :, :] - data[:, None, :], axis=-1)
+    # dists = np.linalg.norm(query_data[None, :, :] - data[:, None, :], axis=-1)
 
     return data
 
 
 def plot_pairwise_dist(data):
+    """
+    Plot the distribution of pairwise distances within a dataset.
+    Args:
+        data: a 2D array of data
+    """
     dists = np.linalg.norm(data[None, :, :] - data[:, None, :], axis=-1)
     n_buckets = 10
     low, high = data.mean() - 1.0 * data.std(), data.mean() + 1.0 * data.std()
@@ -643,12 +696,12 @@ def plot_pairwise_dist(data):
 
 
 def plot_mean_nbs_by_alpha(scheme='MinHash'):
-    '''
+    """
     Plot the effect of the LSH alpha parameter on the average neighborhood size and intra-neighborhood similarity in
     neighborhoods returned by the LSH scheme.
     Args:
         scheme: which type of LSH scheme to use
-    '''
+    """
     k = 1
     l = 12
     n_data = 100
@@ -670,7 +723,7 @@ def plot_mean_nbs_by_alpha(scheme='MinHash'):
         similarity = lambda a, b: - ((a - b)**2).sum(axis=-1)  # negative Euclidean 2-norm
         query_data = gen_uni_rand_data_real(n_queries, n_dims)
         epsilon = 1
-        query_data = gen_planted_rand_data_real(query_data, n_data, R=0.1, epsilon=0.1)
+        query_data = gen_planted_rand_data_real(query_data, n_data, Rs=[0.1], err_width=.2, epsilon=0.1)
         plot_pairwise_dist(data)
 
     else:
@@ -725,13 +778,13 @@ def plot_mean_nbs_by_alpha(scheme='MinHash'):
     # print("Average Jaccard similarity of collisions:", np.mean([jaccard(data[test_idx], data[collision_idx]) for collision_idx in collision_idxs]))
 
 
-def get_k_l_alpha_minhash(posi_sims, false_sims, posi_rate=.90, false_rate=.10):
+def get_k_l_alpha_minhash(posi_dists, false_dists, posi_rate=.90, false_rate=.10):
 
     # We know that when alpha = 1 (most permissive) we'll need to satisfy the most permissive threshold (largest ball)
     # in the vanilla setting.
-    assert posi_sims[-1] == np.min(posi_sims) and false_sims[-1] == np.min(false_sims)
-    posi_sim, false_sim = posi_sims[-1], false_sims[-1]
-    valid_params = get_k_l_minhash(posi_sim, false_sim, posi_rate=posi_rate, false_rate=false_rate)
+    assert posi_dists[-1] == np.max(posi_dists) and false_dists[-1] == np.max(false_dists)
+    posi_dist, false_dist = posi_dists[-1], false_dists[-1]
+    valid_params = get_k_l_minhash(posi_dist, false_dist, posi_rate=posi_rate, false_rate=false_rate)
     all_thresh_satisfied = False
 
     # Keep increasing the "resolution" of our LSH scheme until we find one that is fine-grained enough
@@ -739,19 +792,46 @@ def get_k_l_alpha_minhash(posi_sims, false_sims, posi_rate=.90, false_rate=.10):
         alphas = []
 
         # Look for an alpha to satisfy each neighborhood ball
-        for posi_sim, false_sim in zip(posi_sims, false_sims):
-            alpha = get_alpha_minhash(k, l, posi_sim, false_sim, posi_rate=posi_rate, false_rate=false_rate)
+        for posi_dist, false_dist in zip(posi_dists, false_dists):
+            alpha = get_alpha_minhash(k, l, posi_dist, false_dist, posi_rate=posi_rate, false_rate=false_rate)
             if alpha is None: break
             alphas.append(alpha)
 
         # Stop searching if we've found alphas to satisfy each threshold
-        if len(alphas) == len(posi_sims): break
+        if len(alphas) == len(posi_dists): break
         else: raise Exception('Failed to find (k, l) allowing for alpha-tuned neighborhoods of specified sizes.')
 
     return k, l, alphas
 
 
-def get_alpha_minhash(k, l, posi_sim, false_sim, posi_rate=0.9, false_rate=0.1):
+def get_r_k_l_alpha_pstable(posi_dists, false_dists, posi_rate=.90, false_rate=.10):
+
+    # We know that when alpha = 1 (most permissive) we'll need to satisfy the most permissive threshold (largest ball)
+    # in the vanilla setting.
+    assert posi_dists[-1] == np.max(posi_dists) and false_dists[-1] == np.max(false_dists)
+    posi_dist, false_dist = posi_dists[-1], false_dists[-1]
+    valid_params = get_r_k_l_pstable(posi_dist, false_dist, posi_rate=posi_rate, false_rate=false_rate)
+    all_thresh_satisfied = False
+
+    # Keep increasing the "resolution" of our LSH scheme until we find one that is fine-grained enough
+    # NOTE: valid_params has length 1 for now. Maybe a gamble, maybe not.
+    for r, k, l in valid_params:
+        alphas = []
+
+        # Look for an alpha to satisfy each neighborhood ball
+        for posi_dist, false_dist in zip(posi_dists, false_dists):
+            alpha = get_alpha_pstable(r, k, l, posi_dist, false_dist, posi_rate=posi_rate, false_rate=false_rate)
+            if alpha is None: break
+            alphas.append(alpha)
+
+        # Stop searching if we've found alphas to satisfy each threshold
+        if len(alphas) == len(posi_dists): break
+        else: raise Exception('Failed to find (k, l) allowing for alpha-tuned neighborhoods of specified sizes.')
+
+    return r, k, l, alphas
+
+
+def get_alpha_minhash(k, l, posi_dist, false_dist, posi_rate=0.9, false_rate=0.1):
     '''
     For fixed k and l, find an alpha setting that will satisfy the given thresholds, if one exists.
     Args:
@@ -763,6 +843,11 @@ def get_alpha_minhash(k, l, posi_sim, false_sim, posi_rate=0.9, false_rate=0.1):
         false_rate:
     Returns:
     '''
+
+    # Convert (jaccard) distances to similarities
+    posi_sim = 1 - posi_dist
+    false_sim = 1 - false_dist
+
     plot_collision_prob_alpha(k, l)
     # We're interested in alphas from 1 to l (total number of tables)
     alphas = np.arange(1, l + 1)
@@ -781,39 +866,57 @@ def get_alpha_minhash(k, l, posi_sim, false_sim, posi_rate=0.9, false_rate=0.1):
     return alpha if len(alpha) > 0 else None
 
 
-def get_min_k_l_minhash(posi_sim, false_sim, posi_rate=.90, false_rate=.10):
+def get_alpha_pstable(r, k, l, posi_sim, false_sim, posi_rate=0.9, false_rate=0.1):
     '''
-    Get valid MinHash LSH parameters with least space complexity.
+    For fixed k and l, find an alpha setting that will satisfy the given thresholds, if one exists.
     Args:
+        k:
+        l:
         posi_sim:
         false_sim:
         posi_rate:
         false_rate:
     Returns:
-        k: minimum number of bands required
-        l: minimum number of tables  required
     '''
-    valid_params = get_k_l_minhash(posi_sim, false_sim, posi_rate=posi_rate, false_rate=false_rate)
-    k, l = valid_params[0]
-    assert k == valid_params[:, 0].min() and l == valid_params[:, 1].min()
+    # TODO:
+    # plot_collision_prob_alpha_pstable(r, k, l)
 
-    return k, l
+    # Valid alphas range from 1 to l (total number of tables)
+    alphas = np.arange(1, l + 1)
+    p_ts = np.empty(alphas.shape)
+    p_fs = np.empty(alphas.shape)
+    for ai, alpha in enumerate(alphas):
+        p_t, p_f = collision_prob_pstable(np.array([posi_sim, false_sim]), r, k, l, alpha=alpha)
+        p_ts[ai] = p_t
+        p_fs[ai] = p_f
+
+    # We take the greatest (i.e. least permissive) valid alpha.
+    # Note: we could also take the most permissive? Not sure what's best here.
+    valid_alphas = np.argwhere((p_ts >= posi_rate) & (p_fs <= false_rate)) + 1
+    alpha = valid_alphas[-1]
+
+    return alpha if len(alpha) > 0 else None
 
 
-def get_k_l_minhash(posi_sim, false_sim, posi_rate=.90, false_rate=.10):
+def get_k_l_minhash(posi_dist, false_dist, posi_rate=.90, false_rate=.10):
     '''
     Get LSH parameters to ensure a lower bound on false positives and upper bound on false negatives for items within
     a given similarity threshold
     Args:
-        posi_sim: similarity threshold to be considered a neighbor
-        false_sim: similarity threshold beyond which we want to guarantee low number of collisions
+        posi_dist: distance threshold to be considered a neighbor
+        false_dist: distance threshold beyond which we want to guarantee low number of collisions
         posi_rate: lower bound of probability of successfully identifying a true neighbor
         false_rate: upper bound on probability of mistakenly identifying a false neighbor
     Returns:
     '''
+
+    # Convert (jaccard) distances to similarities
+    posi_sim = 1 - posi_dist
+    false_sim = 1 - false_dist
+
     n_cell = 1000  # The range of values [1, n_cell+1] to check for r and t
 
-    # SimHash parameter search
+    # MinHash parameter search
     # k is number of bands -- size of compressed representation produced by an LSH instance
     # l is the number of LSH instances
     k_idxs = np.arange(n_cell//2) + 1
@@ -833,22 +936,125 @@ def get_k_l_minhash(posi_sim, false_sim, posi_rate=.90, false_rate=.10):
     return valid_params
 
 
-def get_ranked_neighb_params(inner_radii, param_fn):
+def get_r_k_l_pstable(posi_dist, false_dist, posi_rate=.90, false_rate=.10):
+    """
+    Get LSH parameters to ensure a lower bound on false positives and upper bound on false negatives for items within
+    a given similarity threshold
+    Args:
+        posi_sim: similarity threshold to be considered a neighbor
+        false_sim: similarity threshold beyond which we want to guarantee low number of collisions
+        posi_rate: lower bound of probability of successfully identifying a true neighbor
+        false_rate: upper bound on probability of mistakenly identifying a false neighbor
+    Returns:
+    """
+    n_cell = 500  # The range of values [1, n_cell+1] to check for r and t
 
+    # pStable parameter search
+    # k is number of bands -- size of compressed representation produced by an LSH instance
+    # l is the number of LSH instances
+    rs = [1]  # hardcoded
+    ks = np.arange(n_cell) + 1
+    ls = np.arange(n_cell) + 1
+
+    # Calculate chance of catching a true positive (false negative) above (below) a certain similarity threshold
+    # These are both (n_cell, n_cell)-shape grids representing probabilities over different parameters
+    p_tps, p_fps = np.empty(shape=(len(rs), len(ks), len(ls))), np.empty(shape=(len(rs), len(ks), len(ls)))
+
+    # This is pretty slow, but I don't think there's any way to vectorize the integration function inside
+    # collision_prob_pstable??
+    # TODO: just return the first tuple of valid_params. Don't think we ever really need higher resolution to get
+    #  alpha-tuning right.
+    for ri, r in enumerate(rs):
+        for ki, k in enumerate(ks):
+            for li, l in enumerate(ls):
+                p_tp, p_fp = collision_prob_pstable([posi_dist, false_dist], r, k, l)
+
+                if p_tp >= posi_rate and p_fp <= false_rate:
+                    return [(r, k, l)]
+
+    #             p_tps[ri, ki, li] = p_tp
+    #             p_fps[ri, ki, li] = p_fp
+    #
+    # # We take the least parameters over these two dimensions (and assume them to also be the least of each).
+    # valid_params = np.argwhere((p_tps >= posi_rate) & (p_fps <= false_rate)) + 1
+    #
+    # return valid_params
+
+
+def get_min_k_l_minhash(posi_dist, false_dist, posi_rate=.90, false_rate=.10):
+    '''
+    Get valid MinHash LSH parameters with least space complexity.
+    Args:
+        posi_sim:
+        false_sim:
+        posi_rate:
+        false_rate:
+    Returns:
+        k: minimum number of bands required
+        l: minimum number of tables  required
+    '''
+    valid_params = get_k_l_minhash(posi_dist, false_dist, posi_rate=posi_rate, false_rate=false_rate)
+    k, l = valid_params[0]
+    assert k == valid_params[:, 0].min() and l == valid_params[:, 1].min()
+    print(k, l)
+
+    return k, l
+
+
+def get_min_r_k_l_pstable(posi_dist, false_dist, posi_rate=.90, false_rate=.10):
+    '''
+    Get valid pStable LSH parameters with least space complexity.
+    Args:
+        posi_dist:
+        false_dist:
+        posi_rate:
+        false_rate:
+    Returns:
+        r: width of bucket
+        k: minimum number of bands required
+        l: minimum number of tables  required
+    '''
+    valid_params = get_r_k_l_pstable(posi_dist, false_dist, posi_rate=posi_rate, false_rate=false_rate)
+    r, k, l = valid_params[0]
+    # assert r == valid_params[:, 0].min() and k == valid_params[:, 1].min() and l == valid_params[:, 2].min()
+    print(r, k, l)
+
+    return r, k, l
+
+
+def get_ranked_neighb_params(inner_radii, err_width, param_fn):
+    """
+    Get the parameters required to approximate the members of each of the balls in inner_radii, for vanilla LSH schemes.
+    Args:
+        inner_radii:
+        err_width:
+        param_fn:
+    Returns:
+        neighb_params: list of parameters
+    """
     # each near neighborhood is a ball, each anti-neighborhood is the complement of an err_width-larger ball
-    err_width = .2
-    p_sims = 1 - inner_radii
-    f_sims = np.array(p_sims) - err_width
-    neighb_params = [param_fn(posi_sim=p_sim, false_sim=f_sim) for p_sim, f_sim in zip(p_sims, f_sims)]
+    p_dists = inner_radii
+    f_dists = np.array(p_dists) + err_width
+    neighb_params = [param_fn(posi_dist=p_dist, false_dist=f_dist) for p_dist, f_dist in zip(p_dists, f_dists)]
 
     return neighb_params
 
 
-def get_ranked_neighb_params_alpha(inner_radii, param_fn):
-    err_width = .2
-    p_sims = 1 - inner_radii
-    f_sims = np.array(p_sims) - err_width
-    neighb_params = param_fn(p_sims, f_sims)
+def get_ranked_neighb_params_alpha(inner_radii, err_width, param_fn):
+    """
+    Get the parameters required to approximate the members of each of the balls in inner_radii, for alpha-tunable LSH
+    schemes. Will return one of each vanilla LSH parameter, and a list of alphas with which to query in order to
+    isolate neighborhoods of interest.
+    Args:
+        inner_radii:
+        err_width:
+        param_fn:
+    Returns:
+        neighb_params: list of parameters
+    """
+    p_dists = inner_radii
+    f_dists = np.array(p_dists) + err_width
+    neighb_params = param_fn(p_dists, f_dists)
 
     return neighb_params
 
@@ -864,13 +1070,24 @@ def plot_neighb_size(neighbs, xs, xlabel, title):
     plt.plot(xs, mean_sizes)
     plt.xlabel(xlabel)
     plt.ylabel('neighborhood size')
-    plt.savefig(os.path.join(f'{coll_probs_dir}', f'n_nbs_X_radii {title}'))
+    plt.savefig(os.path.join(f'{figs_dir}', f'n_nbs_X_radii {title}'))
     plt.close()
 
     return mean_sizes
 
 
 def plot_neighb_sim(neighbs, data, xs, xlabel, title, sim_fn=jaccard):
+    """
+    Given some neighborhoods, plot the mean intra-neighborhood similarity.
+    Args:
+        neighbs: list of length n_queries of lists of neighborhoods, where neighborhoods are lists of data indices
+                belonging to them.
+        data:
+        xs:
+        xlabel:
+        title:
+        sim_fn:
+    """
     sims = []
     for q_neighbs in neighbs:
         sims.append([np.mean([sim_fn(data[xi], data[yi]) for xi in nb_idxs for yi in nb_idxs if xi != yi])
@@ -880,35 +1097,67 @@ def plot_neighb_sim(neighbs, data, xs, xlabel, title, sim_fn=jaccard):
     plt.plot(xs, mean_sims)
     plt.xlabel(xlabel)
     plt.ylabel('intra-neighborhood distance')
-    plt.savefig(os.path.join(f'{coll_probs_dir}', f'nb_sim_X_radii {title}'))
+    plt.savefig(os.path.join(f'{figs_dir}', f'nb_sim_X_radii {title}'))
     plt.close()
 
     return sims
 
 
 def get_ranked_neighbs(scheme='MinHash'):
-    '''
+    """
     Find ranked nearest-neighbors using both the alpha-tunable LSH container, and multiple vanilla LSH containers.
     Args:
         scheme (str): the underlying LSH scheme. So far, either 'MinHash' or 'pStable'
-    '''
-    radii = np.linspace(0.1, 0.2, 3)
-    container = RankedNeighborContainer(radii,
-                                        container_args={
-                                            'lsh_cls': MinHash,
-                                        })
-    alpha_container = AlphaRankedNeighborContainer(radii,
-                                                   container_args={
-                                                       'lsh_cls': AlphaLSH,
-                                                       'lsh_args': {
-                                                           'lsh_cls': MinHash,
-                                                       }
-                                                   })
-    dim = 100
+    """
+    n_dims = 100
     n_data = 1000
     n_query = 10
-    data = gen_uni_rand_data_bin(n_data, dim)
-    query_data = gen_uni_rand_data_bin(n_query, dim)
+    if scheme == 'MinHash':
+        radii = np.linspace(0.1, 0.2, 3)
+        err_width = 0.2
+        container = RankedNeighborContainer(
+            radii,
+            err_width,
+            container_args={
+                'lsh_cls': MinHash,
+            }
+        )
+        alpha_container = AlphaRankedNeighborContainer(
+            radii,
+            err_width,
+            container_args={
+                'lsh_cls': AlphaLSH,
+                'lsh_args': {
+                    'lsh_cls': MinHash,
+                }
+            }
+        )
+        query_data = gen_uni_rand_data_bin(n_query, n_dims)
+        data = gen_uni_rand_data_bin(n_data, n_dims)
+    elif scheme == 'pStable':
+        radii = np.linspace(0.1, 0.3, 3)
+        err_width = 0.2
+        container = RankedNeighborContainerPStable(
+            radii,
+            err_width,
+            n_dims=n_dims,
+            container_args={
+                'lsh_cls': pStableHash,
+            }
+        )
+        alpha_container = AlphaRankedNeighborContainerPStable(
+            radii,
+            err_width,
+            n_dims=n_dims,
+            container_args={
+                'lsh_cls': AlphaLSH,
+            }
+        )
+        query_data = gen_uni_rand_data_real(n_query, n_dims)
+        data = gen_planted_rand_data_real(query_data, n_data, Rs=radii, err_width=err_width, epsilon=0.1)
+
+    else:
+        raise Exception(f'Unsupported LSH scheme "{scheme}".')
     data_idxs_a = alpha_container.hash(data)
     data_idxs = container.hash(data)
     assert np.all(data_idxs == data_idxs_a)
@@ -929,9 +1178,10 @@ def get_ranked_neighbs(scheme='MinHash'):
 
 
 def main():
+
+    # Get ranked neighbors on synthetic data (more cleverly constructed for p-stable distributions)
     get_ranked_neighbs(scheme='MinHash')
-    # TODO: implement ranked neighborhood experiment based on p-Stable LSH
-    # get_ranked_neighbs(scheme='pStable')
+    get_ranked_neighbs(scheme='pStable')
 
     # Look at effect of alpha on neighborhood size/similarity, fixing other parameters
     plot_mean_nbs_by_alpha(scheme='pStable')
