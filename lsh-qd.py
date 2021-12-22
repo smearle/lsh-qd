@@ -1,7 +1,7 @@
+import copy
 import math
 import os
 
-import dists as dists
 import numpy as np
 from scipy import integrate
 from tqdm import tqdm
@@ -359,8 +359,10 @@ class RankedNeighborContainer(object):
     """
     def __init__(self, inner_radii, err_width, container_args):
         neighb_params = get_ranked_neighb_params(inner_radii, err_width, get_min_k_l_minhash)
-        for k, l in neighb_params:
-            plot_collision_prob(ks=[k], ls=[l])
+        ks = [k for k, l in neighb_params]
+        plot_collision_prob_pstable(ks, ls=[l])
+        # for k, l in neighb_params:
+        #     plot_collision_prob(ks=[k], ls=[l])
         self.neighb_containers = [LSHContainer(*n_params, **container_args) for n_params in neighb_params]
 
     def hash(self, data):
@@ -489,12 +491,11 @@ def collision_prob_pstable(dists, r, k, l, alpha=1):
     Returns:
         an integer or 1D vector of collision probabilities in [0, 1]
     """
-    x_res = 1000
     p_projs = np.empty(len(dists))
 
     for di, d in enumerate(dists):
         if d == 0:
-            p_projs[di] = 0
+            p_projs[di] = 1
             continue
         result = integrate.quad(lambda t: (1 / d) * f_G(t / d) * (1 - (t / r)), 0, r)
         p_proj = 2 * result[0]
@@ -504,27 +505,37 @@ def collision_prob_pstable(dists, r, k, l, alpha=1):
 
     return coll_probs
 
+default_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+
 
 def plot_collision_prob_pstable(ks, ls, rs):
-
-    # d = np.linspace(-2, 2, 100)
-    #
-    # f_G_d = f_G(d)
-    # plt.plot(d, f_G_d)
-    # plt.show()
-
     dists = np.linspace(0, 4, 100)
     for li, l in enumerate(ls):
         for ri, r in enumerate(rs):
             for ki, k in enumerate(ks):
                 coll_probs = collision_prob_pstable(dists, r, k, l)
-                label = f'k = {round(k, 2)}' if ki == 0 or ki == len(ks) - 1 else None
-                plt.plot(dists, coll_probs, label=label, color='blue', alpha=1 - 0.8 * (len(ks) - ki) / len(ks))
+                label = f'r = {round(k, 2)}' if ki == 0 or ki == len(ks) - 1 else None
+                plt.plot(dists, coll_probs, label=label, color=default_colors[0], alpha=1 - 0.8 * (len(ks) - ki) / len(ks))
+            plt.title('LSH, t=20')
             plt.xlabel('item distances')
             plt.ylabel('collision probability')
             plt.legend()
             plt.savefig(os.path.join(f'{coll_probs_dir}', f'pstable_l-{l}_r-{r}'))
             plt.close()
+
+
+def plot_collision_prob_pstable_alpha(k, l, r):
+    dists = np.linspace(0, 4, 100)
+    for ai, alpha in enumerate(range(1, l+1)):
+        coll_probs = collision_prob_pstable(dists, r, k, l, alpha=alpha)
+        label = f'alpha = {round(alpha, 2)}' if ai == 0 or ai == l - 1 else None
+        plt.plot(dists, coll_probs, label=label, color=default_colors[1], alpha=1 - 0.8 * (l - ai) / l)
+    plt.title('alpha-LSH, t=20, r=1')
+    plt.xlabel('item distances')
+    plt.ylabel('collision probability')
+    plt.legend()
+    plt.savefig(os.path.join(f'{coll_probs_dir}', f'pstable_alpha_l-{l}_r-{r}'))
+    plt.close()
 
 
 def plot_collision_prob(ks, ls):
@@ -671,7 +682,7 @@ def gen_planted_rand_data_real(query_data, n_data, Rs, err_width, epsilon):
     q_idxs = np.random.choice(n_queries, size=n_non_nbs)
     data[bi:] = data[bi:] + query_data[q_idxs]
 
-    # dists = np.linalg.norm(query_data[None, :, :] - data[:, None, :], axis=-1)
+    dists = np.linalg.norm(query_data[None, :, :] - data[:, None, :], axis=-1)
 
     return data
 
@@ -720,7 +731,7 @@ def plot_mean_nbs_by_alpha(scheme='MinHash'):
             'n_dims': n_dims}
         lsh_container = LSHContainer(l=l, k=k, lsh_cls=AlphaLSH, lsh_args=lsh_args)
         data = gen_uni_rand_data_real(n_data, n_dims)
-        similarity = lambda a, b: - ((a - b)**2).sum(axis=-1)  # negative Euclidean 2-norm
+        similarity = lambda a, b: np.linalg.norm(a - b, axis=-1)  # negative Euclidean 2-norm
         query_data = gen_uni_rand_data_real(n_queries, n_dims)
         epsilon = 1
         query_data = gen_planted_rand_data_real(query_data, n_data, Rs=[0.1], err_width=.2, epsilon=0.1)
@@ -747,13 +758,14 @@ def plot_mean_nbs_by_alpha(scheme='MinHash'):
         for q in query_data:
             nb_idxs = lsh_container.query(q, alpha=alpha)
             n_nbs = len(nb_idxs)
-            mean_sim = np.mean([similarity(lsh_container.data[i], lsh_container.data[j]) for i in nb_idxs
-                               for j in nb_idxs if i > j])
+            sims = [similarity(lsh_container.data[i], lsh_container.data[j]) for i in nb_idxs
+                               for j in nb_idxs if i > j]
+            mean_sim = np.nanmean(sims)
             q_n_nbs.append(n_nbs)
             q_sims.append(mean_sim)
             # print([1 - jaccard(lsh_container.data[q_idx], lsh_container.data[nb_idx]) for nb_idx in nb_idxs])
-        a_n_nbs.append(np.mean(q_n_nbs))
-        a_sims.append(np.mean(q_sims))
+        a_n_nbs.append(np.nanmean(q_n_nbs))
+        a_sims.append(np.nanmean(q_sims))
 
     scheme_dir = os.path.join(figs_dir, scheme)
     plt.plot(alphas, a_n_nbs)
@@ -762,7 +774,7 @@ def plot_mean_nbs_by_alpha(scheme='MinHash'):
     plt.savefig(f'{scheme_dir}/mean_nbs_X_alpha')
     plt.close()
 
-    # a_sims = np.where(np.isnan(a_sims), 1, a_sims)
+    a_sims = np.where(np.isnan(a_sims), 0, a_sims)
     plt.plot(alphas, a_sims)
     plt.ylabel('mean intra-neighborhood similarity')
     plt.xlabel('alpha')
@@ -866,7 +878,7 @@ def get_alpha_minhash(k, l, posi_dist, false_dist, posi_rate=0.9, false_rate=0.1
     return alpha if len(alpha) > 0 else None
 
 
-def get_alpha_pstable(r, k, l, posi_sim, false_sim, posi_rate=0.9, false_rate=0.1):
+def get_alpha_pstable(r, k, l, posi_dist, false_dist, posi_rate=0.9, false_rate=0.1):
     '''
     For fixed k and l, find an alpha setting that will satisfy the given thresholds, if one exists.
     Args:
@@ -886,12 +898,11 @@ def get_alpha_pstable(r, k, l, posi_sim, false_sim, posi_rate=0.9, false_rate=0.
     p_ts = np.empty(alphas.shape)
     p_fs = np.empty(alphas.shape)
     for ai, alpha in enumerate(alphas):
-        p_t, p_f = collision_prob_pstable(np.array([posi_sim, false_sim]), r, k, l, alpha=alpha)
+        p_t, p_f = collision_prob_pstable(np.array([posi_dist, false_dist]), r, k, l, alpha=alpha)
         p_ts[ai] = p_t
         p_fs[ai] = p_f
 
-    # We take the greatest (i.e. least permissive) valid alpha.
-    # Note: we could also take the most permissive? Not sure what's best here.
+    # We take the greatest (i.e. least permissive) valid alpha, in an effort to minimize required distance computations.
     valid_alphas = np.argwhere((p_ts >= posi_rate) & (p_fs <= false_rate)) + 1
     alpha = valid_alphas[-1]
 
@@ -919,7 +930,7 @@ def get_k_l_minhash(posi_dist, false_dist, posi_rate=.90, false_rate=.10):
     # MinHash parameter search
     # k is number of bands -- size of compressed representation produced by an LSH instance
     # l is the number of LSH instances
-    k_idxs = np.arange(n_cell//2) + 1
+    k_idxs = np.arange(n_cell) + 1
     l_idxs = np.arange(n_cell) + 1
 
     # Note that k varies over columns, l varies between rows
@@ -947,38 +958,57 @@ def get_r_k_l_pstable(posi_dist, false_dist, posi_rate=.90, false_rate=.10):
         false_rate: upper bound on probability of mistakenly identifying a false neighbor
     Returns:
     """
-    n_cell = 500  # The range of values [1, n_cell+1] to check for r and t
+
+    # TODO: I've seen a giant spike in alpha-LSH neighborhood size with 400 < n_cell < 500. Investigate this!!!
+    k_n_cell = 1000  # The range of values [1, n_cell+1] to check for k and l
+    l_n_cell = 350
+
 
     # pStable parameter search
     # k is number of bands -- size of compressed representation produced by an LSH instance
     # l is the number of LSH instances
     rs = [1]  # hardcoded
-    ks = np.arange(n_cell) + 1
-    ls = np.arange(n_cell) + 1
+    ks = np.arange(k_n_cell) + 1
+    ls = np.arange(l_n_cell) + 1
 
     # Calculate chance of catching a true positive (false negative) above (below) a certain similarity threshold
     # These are both (n_cell, n_cell)-shape grids representing probabilities over different parameters
     p_tps, p_fps = np.empty(shape=(len(rs), len(ks), len(ls))), np.empty(shape=(len(rs), len(ks), len(ls)))
 
-    # This is pretty slow, but I don't think there's any way to vectorize the integration function inside
-    # collision_prob_pstable??
-    # TODO: just return the first tuple of valid_params. Don't think we ever really need higher resolution to get
+    # Cache the probabilities of colliding on a single projection for each distance of interest.
+    # Also depends on the fact we have only one r at the moment
+    dists = [posi_dist, false_dist]
+    p_projs = np.empty(len(dists))
+    for di, d in enumerate(dists):
+        result = integrate.quad(lambda t: (1 / d) * f_G(t / d) * (1 - (t / rs[0])), 0, rs[0])
+        p_proj = 2 * result[0]
+        p_projs[di] = p_proj
+
+    # Optionally return just the first tuple of valid_params. Don't think we ever really need higher resolution to get
     #  alpha-tuning right.
+    RETURN_FIRST = False
+
     for ri, r in enumerate(rs):
         for ki, k in enumerate(ks):
             for li, l in enumerate(ls):
-                p_tp, p_fp = collision_prob_pstable([posi_dist, false_dist], r, k, l)
+                # This is pretty slow, but I don't think there's any way to vectorize the integration function inside
+                # collision_prob_pstable??
+                # p_tp, p_fp = collision_prob_pstable([posi_dist, false_dist], r, k, l)
 
-                if p_tp >= posi_rate and p_fp <= false_rate:
-                    return [(r, k, l)]
+                # Use cached integration result
+                p_tp, p_fp = collision_prob_alpha(sim=p_projs, k=k, l=l, alpha=1)
 
-    #             p_tps[ri, ki, li] = p_tp
-    #             p_fps[ri, ki, li] = p_fp
-    #
-    # # We take the least parameters over these two dimensions (and assume them to also be the least of each).
-    # valid_params = np.argwhere((p_tps >= posi_rate) & (p_fps <= false_rate)) + 1
-    #
-    # return valid_params
+                if RETURN_FIRST:
+                    if p_tp >= posi_rate and p_fp <= false_rate:
+                        return [(r, k, l)]
+                else:
+                    p_tps[ri, ki, li] = p_tp
+                    p_fps[ri, ki, li] = p_fp
+
+    # We take the least parameters over these two dimensions (and assume them to also be the least of each).
+    valid_params = np.argwhere((p_tps >= posi_rate) & (p_fps <= false_rate)) + 1
+
+    return valid_params
 
 
 def get_min_k_l_minhash(posi_dist, false_dist, posi_rate=.90, false_rate=.10):
@@ -1017,7 +1047,6 @@ def get_min_r_k_l_pstable(posi_dist, false_dist, posi_rate=.90, false_rate=.10):
     valid_params = get_r_k_l_pstable(posi_dist, false_dist, posi_rate=posi_rate, false_rate=false_rate)
     r, k, l = valid_params[0]
     # assert r == valid_params[:, 0].min() and k == valid_params[:, 1].min() and l == valid_params[:, 2].min()
-    print(r, k, l)
 
     return r, k, l
 
@@ -1090,10 +1119,11 @@ def plot_neighb_sim(neighbs, data, xs, xlabel, title, sim_fn=jaccard):
     """
     sims = []
     for q_neighbs in neighbs:
-        sims.append([np.mean([sim_fn(data[xi], data[yi]) for xi in nb_idxs for yi in nb_idxs if xi != yi])
-                              for nb_idxs in q_neighbs])
+        q_sims = [[sim_fn(data[xi], data[yi]) for xi in nb_idxs for yi in nb_idxs if xi != yi] for nb_idxs in q_neighbs]
+        sims.append([np.nanmean(qs) for qs in q_sims])
     sims = np.array(sims)
     mean_sims = np.nanmean(sims, axis=0)
+    mean_sims = np.where(np.isnan(mean_sims), 1, mean_sims)
     plt.plot(xs, mean_sims)
     plt.xlabel(xlabel)
     plt.ylabel('intra-neighborhood distance')
@@ -1177,10 +1207,193 @@ def get_ranked_neighbs(scheme='MinHash'):
     plot_neighb_sim(neighbs_alpha, data, xs=radii, xlabel='radii', title=f'Alpha{scheme}')
 
 
+def l2_norm(x, y):
+    return np.sqrt(np.sum((x - y) ** 2, axis=-1))
+
+
+def get_pct_neighb_correct(queries, neighbs, d1, data, dist_fn):
+    """
+    Compute the percentage of true positives recovered.
+
+    Args:
+        queries:
+        neighbs:
+        posi_dist:
+        data:
+
+    Returns:
+    """
+    ts = []
+    for q, neighb in zip(queries, neighbs):
+        true_idxs = {i for i in data.keys() if dist_fn(data[i], q) <= d1}
+        if len(true_idxs) == 0: continue
+        n_true = len([i for i in neighb if i in true_idxs])
+        ts.append(n_true / len(true_idxs))
+
+    return np.mean(ts)
+
+
+def alpha_v_lsh_nn_minhash(n_dims):
+
+    # Distance below which items are considered near neighbors
+    d1 = 0.6
+    posi_rate = 0.9
+
+    # We don't really care about false positives!
+    err_width = 0.1
+    d2 = d1 + err_width
+    false_rate = 1.0
+
+    params = get_k_l_minhash(d1, d1 + err_width, posi_rate, false_rate)
+
+    # Fix number of tables
+    l = 66
+
+    valid_params = np.vstack([p for p in params if p[1] == l])
+    k, l = valid_params[-1]
+    assert k == np.max(valid_params[:, 0])
+    plot_collision_prob(ks=valid_params[:, 0], ls=[l])
+
+    k_a = 1
+
+    alpha = get_alpha_minhash(k_a, l, d1, d2, posi_rate, false_rate)
+
+    container = LSHContainer(k=k, l=l, lsh_cls=MinHash)
+    alpha_container = LSHContainer(k=k_a, l=l)
+
+    # TODO: kind of need planted near neighbors data here...
+    #  For now we've just fiddled with the target distance to include some of the data, which is densely clustered
+    # around the mean
+    query_data = gen_uni_rand_data_bin(100, n_dims)
+    data = gen_uni_rand_data_bin(100, n_dims)
+    plot_pairwise_dist(data)
+
+    dis = container.hash(data)
+    a_dis = alpha_container.hash(data)
+    assert np.all(dis == a_dis)
+
+    neighbs = [container.query(q) for q in query_data]
+    neighbs_a = [alpha_container.query(q, alpha=alpha) for q in query_data]
+
+    corr = get_pct_neighb_correct(query_data, neighbs, d1, container.data, jaccard)
+    mean_size = np.mean([len(n) for n in neighbs])
+    print(corr)
+    print(mean_size)
+
+    corr_a = get_pct_neighb_correct(query_data, neighbs, d1, alpha_container.data, jaccard)
+    mean_size_a = np.mean([len(n) for n in neighbs_a])
+    print(corr_a)
+    print(mean_size_a)
+
+    return
+
+
+def alpha_v_lsh_nn_pstable(n_dims, d1, p1, l_size, seed=42):
+
+    # Distance below which items are considered near neighbors
+    d1 = 2
+    posi_rate = 0.9
+
+    # This has no effect, there is no limitation on false positives
+    err_width = 1.0
+    d2 = 1.0
+    false_rate = 1.0
+
+    params = get_r_k_l_pstable(d1, d2, posi_rate, false_rate)
+
+    # Fix number of tables
+    sorted_ls = sorted(list(set(params[:, 2])))
+    l = sorted_ls[int(len(sorted_ls) * l_size)]
+
+    valid_params = np.vstack([p for p in params if p[2] == l])
+    r, k, l = valid_params[-1]
+    assert k == np.max(valid_params[:, 1])
+    plot_collision_prob_pstable(ks=valid_params[:, 1], ls=[l], rs=[r])
+
+    k_a = 1
+
+    alpha = get_alpha_pstable(r, k_a, l, d1, d2, posi_rate, false_rate)
+
+    lsh_args = {
+        'r': r,
+        'n_dims': n_dims,
+    }
+    alpha_lsh_args = copy.deepcopy(lsh_args)
+    alpha_lsh_args.update({
+        'lsh_cls': pStableHash,
+    })
+    container = LSHContainer(k=k, l=l, lsh_cls=pStableHash, lsh_args=lsh_args, seed=seed)
+    alpha_container = LSHContainer(k=k_a, l=l, lsh_cls=AlphaLSH, lsh_args=alpha_lsh_args, seed=seed)
+
+    query_data = gen_uni_rand_data_real(100, n_dims)
+    data = gen_planted_rand_data_real(query_data, n_data=1000, Rs=[d1], err_width=0, epsilon=3.0)
+
+    idxs = container.hash(data)
+    idxs_a = alpha_container.hash(data)
+    assert np.all(idxs == idxs_a)
+
+    neighbs = [container.query(q) for q in query_data]
+    neighbs_a = [alpha_container.query(q, alpha=alpha) for q in query_data]
+
+    corr = get_pct_neighb_correct(query_data, neighbs, d1, container.data, l2_norm)
+    mean_size = np.mean([len(n) for n in neighbs])
+    print('LSH')
+    print(f'hit ratio {corr}')
+    print(f'neighb size {mean_size}')
+
+    corr_a = get_pct_neighb_correct(query_data, neighbs, d1, alpha_container.data, l2_norm)
+    mean_size_a = np.mean([len(n) for n in neighbs_a])
+    print('alpha-LSH')
+    print(f'hit ratio {corr_a}')
+    print(f'neighb size {mean_size_a}')
+
+    return l, mean_size, mean_size_a
+
+
+def test_approx_near_neighbors():
+    # Does tuning r in vanilla LSH, or alpha in tunable-LSH give better results when searching for near-neighbors?
+    # print('minhash')
+    # alpha_v_lsh_nn_minhash(1000)
+    print('pstable')
+    p1 = 0.99
+    # d1s = np.arange(0.1, 5, 0.5)
+    d1 = 1
+
+    # Iterate over parameter l in terms of where in the range of admissible ls it falls
+    l_sizes = np.arange(0, 1, 1/20)
+    seeds = np.random.randint(0, 1e10, 3)
+    ls = []
+    n_nbss = np.empty((len(l_sizes), len(seeds)))
+    n_nbss_a = n_nbss.copy()
+    for li, l_size in enumerate(l_sizes):
+        n_nbs, n_nbs_a = [], []
+        for si, seed in enumerate(seeds):
+            l, n_nbs, n_nbs_a = alpha_v_lsh_nn_pstable(1000, d1, p1, l_size, seed=seed)
+            n_nbss[li, si] = n_nbs
+            n_nbss_a[li, si] = n_nbs_a
+        print(f'l: {l}')
+        ls.append(l)
+    plt.errorbar(ls, n_nbss.mean(axis=1), yerr=n_nbss.std(axis=1),  label='LSH')
+    plt.errorbar(ls, n_nbss_a.mean(axis=1), yerr=n_nbss_a.std(axis=1), label='alpha-LSH')
+    plt.xlabel('t')
+    plt.ylabel('neighborhood size')
+    plt.legend()
+    plt.savefig(os.path.join(figs_dir, 'nb_size_X_l'))
+
+
 def main():
 
+    # Generate some example collision curves to demonstrate alpha-LSH's finer level of control
+    l = 20
+    plot_collision_prob_pstable(ks=[i+1 for i in range(l)], ls=[l], rs=[1])
+    plot_collision_prob_pstable_alpha(k=1, l=l, r=1)
+
+    test_approx_near_neighbors()
+
+    return
+
     # Get ranked neighbors on synthetic data (more cleverly constructed for p-stable distributions)
-    get_ranked_neighbs(scheme='MinHash')
+    # get_ranked_neighbs(scheme='MinHash')
     get_ranked_neighbs(scheme='pStable')
 
     # Look at effect of alpha on neighborhood size/similarity, fixing other parameters
