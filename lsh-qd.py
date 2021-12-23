@@ -1,6 +1,8 @@
+from pdb import set_trace as TT
 import copy
 import math
 import os
+from functools import partial
 
 import numpy as np
 from scipy import integrate
@@ -357,10 +359,19 @@ class RankedNeighborContainer(object):
     distance thresholds (i.e. within balls of varying radii around each query point), by using a
     differently-tuned vanilla LSH scheme for each ball.
     """
-    def __init__(self, inner_radii, err_width, container_args):
+    def __init__(self, inner_radii, err_width, container_args, l_size=0.5):
+
+        # Hackishly tune for false positives after the fact
+        get_min_k_l_minhash = partial(get_k_l_minhash, false_rate=1.0)
         neighb_params = get_ranked_neighb_params(inner_radii, err_width, get_min_k_l_minhash)
-        ks = [k for k, l in neighb_params]
-        plot_collision_prob_pstable(ks, ls=[l])
+        for i in range(len(neighb_params)):
+            n_params = neighb_params[i]
+            ls = n_params[:, 1]
+            l = ls[int(math.floor(l_size * len(ls) - 1))]
+            k = np.max([ki for ki, li in n_params if li == l])
+            neighb_params[i] = [(k, l)]
+        # ks = [k for k, l in neighb_params]
+        # plot_collision_prob_pstable(ks, ls=[l])
         # for k, l in neighb_params:
         #     plot_collision_prob(ks=[k], ls=[l])
         self.neighb_containers = [LSHContainer(*n_params, **container_args) for n_params in neighb_params]
@@ -380,10 +391,16 @@ class RankedNeighborContainer(object):
 
 
 class RankedNeighborContainerPStable(RankedNeighborContainer):
-    def __init__(self, inner_radii, err_width, n_dims, container_args):
+    def __init__(self, inner_radii, err_width, n_dims, container_args, l_size=0.5):
         neighb_params = get_ranked_neighb_params(inner_radii, err_width, get_min_r_k_l_pstable)
-        for r, k, l in neighb_params:
-            plot_collision_prob_pstable(ks=[k], ls=[l], rs=[r])
+        for i in range(len(neighb_params)):
+            n_params = neighb_params[i]
+            ls = n_params[:, 2]
+            l = ls[int(math.floor(l_size * len(ls) - 1))]
+            k = np.max([ki for ri, ki, li in n_params if li == l])
+            neighb_params[i] = [(ri, k, l)]
+        # for r, k, l in neighb_params:
+        #     plot_collision_prob_pstable(ks=[k], ls=[l], rs=[r])
         self.neighb_containers = [LSHContainer(k=k, l=l, lsh_args={'r': r, 'n_dims': n_dims}, **container_args)
                                   for r, k, l in neighb_params]
 
@@ -394,7 +411,7 @@ class AlphaRankedNeighborContainer(object):
     distance thresholds (i.e. within balls of varying radii around each query point), by using a single alpha-tunable
     LSH scheme.
     '''
-    def __init__(self, inner_radii, err_width, container_args):
+    def __init__(self, inner_radii, err_width, container_args, l_size=1.0):
         neighb_params = get_ranked_neighb_params_alpha(inner_radii, err_width, get_k_l_alpha_minhash)
         k, l, alphas = neighb_params
         self.alphas = alphas
@@ -516,8 +533,8 @@ def plot_collision_prob_pstable(ks, ls, rs):
                 coll_probs = collision_prob_pstable(dists, r, k, l)
                 label = f'r = {round(k, 2)}' if ki == 0 or ki == len(ks) - 1 else None
                 plt.plot(dists, coll_probs, label=label, color=default_colors[0], alpha=1 - 0.8 * (len(ks) - ki) / len(ks))
-            plt.title('LSH, t=20')
-            plt.xlabel('item distances')
+            plt.title('LSH, p-Stable')
+            plt.xlabel('item distance')
             plt.ylabel('collision probability')
             plt.legend()
             plt.savefig(os.path.join(f'{coll_probs_dir}', f'pstable_l-{l}_r-{r}'))
@@ -530,8 +547,8 @@ def plot_collision_prob_pstable_alpha(k, l, r):
         coll_probs = collision_prob_pstable(dists, r, k, l, alpha=alpha)
         label = f'alpha = {round(alpha, 2)}' if ai == 0 or ai == l - 1 else None
         plt.plot(dists, coll_probs, label=label, color=default_colors[1], alpha=1 - 0.8 * (l - ai) / l)
-    plt.title('alpha-LSH, t=20, r=1')
-    plt.xlabel('item distances')
+    plt.title('alpha-LSH, p-Stable')
+    plt.xlabel('item distance')
     plt.ylabel('collision probability')
     plt.legend()
     plt.savefig(os.path.join(f'{coll_probs_dir}', f'pstable_alpha_l-{l}_r-{r}'))
@@ -563,12 +580,13 @@ def plot_collision_prob(ks, ls):
         for ki, k in enumerate(ks):
             cp = collision_prob(sim, k, l)
             l_cps.append(cp)
-            label = f'k = {int(k)}' if ki == 0 or ki == len(ks) - 1 else None
-            plt.plot(sim, cp, label=label, color='red', alpha=alpha_fn(ki))
+            label = f'r = {int(k)}' if ki == 0 or ki == len(ks) - 1 else None
+            plt.plot(1 - sim, cp, label=label, color=default_colors[0], alpha=alpha_fn(ki))
 
         cps.append(l_cps)
+        plt.title('LSH, MinHash')
         plt.legend()
-        plt.xlabel('item similarity')
+        plt.xlabel('item distance')
         plt.ylabel('collision probability')
         plt.savefig(os.path.join(f'{coll_probs_dir}', title))
         plt.close()
@@ -592,10 +610,11 @@ def plot_collision_prob_alpha(k, l):
     for ai, a in enumerate(alphas):
         p_coll = collision_prob_alpha(v, k, l, alpha=a)
         label = f'alpha = {int(a)}' if ai == 0 or ai == len(alphas) else None
-        plt.plot(v, p_coll, label=label, color='blue', alpha=alpha_fn(ai))
+        plt.plot(1 - v, p_coll, label=label, color=default_colors[1], alpha=alpha_fn(ai))
 
-    plt.xlabel('item similarity')
+    plt.xlabel('item distance')
     plt.ylabel('collision probability')
+    plt.title('alpha-LSH, MinHash')
     plt.legend()
     plt.savefig(f'{coll_probs_dir}/alphas_k-{k}_l-{l}.png')
     plt.close()
@@ -626,6 +645,15 @@ def gen_uni_rand_data_real(n_data, n_dims):
     '''
     data = np.random.random((n_data, n_dims))
     data = (data - 0.5) * 2
+    data -= data.mean(axis=0)
+
+    # Shrink data so that we have a reasonable number in our target neighborhood
+    data = data / np.linalg.norm(data, axis=-1, keepdims=True)
+    # FIXME: this is very ad hoc
+    data *= 0.72
+
+    dists = (np.linalg.norm(data[None,...] - data[:, None,...], axis=-1))
+    print(dists.mean(), dists.max(), dists.min())
 
     return data
 
@@ -809,9 +837,11 @@ def get_k_l_alpha_minhash(posi_dists, false_dists, posi_rate=.90, false_rate=.10
             if alpha is None: break
             alphas.append(alpha)
 
-        # Stop searching if we've found alphas to satisfy each threshold
-        if len(alphas) == len(posi_dists): break
-        else: raise Exception('Failed to find (k, l) allowing for alpha-tuned neighborhoods of specified sizes.')
+        # Stop searching if we've found alphas to satisfy each threshold. Otherwise we fail
+        if len(alphas) == len(posi_dists):
+            break
+        else:
+            raise Exception('Failed to find (k, l) allowing for alpha-tuned neighborhoods of specified sizes.')
 
     return k, l, alphas
 
@@ -843,7 +873,7 @@ def get_r_k_l_alpha_pstable(posi_dists, false_dists, posi_rate=.90, false_rate=.
     return r, k, l, alphas
 
 
-def get_alpha_minhash(k, l, posi_dist, false_dist, posi_rate=0.9, false_rate=0.1):
+def get_alpha_minhash(k, l, posi_dist, false_dist, posi_rate=0.9, false_rate=0.1, plot=False):
     '''
     For fixed k and l, find an alpha setting that will satisfy the given thresholds, if one exists.
     Args:
@@ -860,7 +890,9 @@ def get_alpha_minhash(k, l, posi_dist, false_dist, posi_rate=0.9, false_rate=0.1
     posi_sim = 1 - posi_dist
     false_sim = 1 - false_dist
 
-    plot_collision_prob_alpha(k, l)
+    if plot:
+        plot_collision_prob_alpha(k, l)
+
     # We're interested in alphas from 1 to l (total number of tables)
     alphas = np.arange(1, l + 1)
     p_ts = np.empty(alphas.shape)
@@ -961,13 +993,13 @@ def get_r_k_l_pstable(posi_dist, false_dist, posi_rate=.90, false_rate=.10):
 
     # TODO: I've seen a giant spike in alpha-LSH neighborhood size with 400 < n_cell < 500. Investigate this!!!
     k_n_cell = 1000  # The range of values [1, n_cell+1] to check for k and l
-    l_n_cell = 350
+    l_n_cell = 400
 
 
     # pStable parameter search
     # k is number of bands -- size of compressed representation produced by an LSH instance
     # l is the number of LSH instances
-    rs = [1]  # hardcoded
+    rs = [0.5]  # hardcoded
     ks = np.arange(k_n_cell) + 1
     ls = np.arange(l_n_cell) + 1
 
@@ -1133,7 +1165,7 @@ def plot_neighb_sim(neighbs, data, xs, xlabel, title, sim_fn=jaccard):
     return sims
 
 
-def get_ranked_neighbs(scheme='MinHash'):
+def get_ranked_neighbs(scheme='pStable', gen_data='planted'):
     """
     Find ranked nearest-neighbors using both the alpha-tunable LSH container, and multiple vanilla LSH containers.
     Args:
@@ -1144,7 +1176,7 @@ def get_ranked_neighbs(scheme='MinHash'):
     n_query = 10
     if scheme == 'MinHash':
         radii = np.linspace(0.1, 0.2, 3)
-        err_width = 0.2
+        err_width = 0.0
         container = RankedNeighborContainer(
             radii,
             err_width,
@@ -1184,7 +1216,10 @@ def get_ranked_neighbs(scheme='MinHash'):
             }
         )
         query_data = gen_uni_rand_data_real(n_query, n_dims)
-        data = gen_planted_rand_data_real(query_data, n_data, Rs=radii, err_width=err_width, epsilon=0.1)
+        if gen_data == 'planted':
+            data = gen_planted_rand_data_real(query_data, n_data, Rs=radii, err_width=err_width, epsilon=0.3)
+        else:
+            data = gen_uni_rand_data_real(n_data, n_dims)
 
     else:
         raise Exception(f'Unsupported LSH scheme "{scheme}".')
@@ -1229,30 +1264,40 @@ def get_pct_neighb_correct(queries, neighbs, d1, data, dist_fn):
         if len(true_idxs) == 0: continue
         n_true = len([i for i in neighb if i in true_idxs])
         ts.append(n_true / len(true_idxs))
+    if len(true_idxs) == 0:
+        pass
+    print(f'true neighb size {len(true_idxs)}')
 
     return np.mean(ts)
 
 
-def alpha_v_lsh_nn_minhash(n_dims):
+# TODO: consolidate these two functions for minhash, p-stable... adding a "scheme" kwarg? Need to untangle them a bit first.
+def alpha_v_lsh_nn_minhash(n_dims, d1, p1, l_size, seed=42, plot=False, gen_data='rand'):
+
+    if gen_data != 'rand':
+        return
 
     # Distance below which items are considered near neighbors
-    d1 = 0.6
-    posi_rate = 0.9
+    d1 = d1
+    posi_rate = p1
 
     # We don't really care about false positives!
     err_width = 0.1
     d2 = d1 + err_width
     false_rate = 1.0
 
-    params = get_k_l_minhash(d1, d1 + err_width, posi_rate, false_rate)
+    params = get_k_l_minhash(d1, d2, posi_rate, false_rate)
 
     # Fix number of tables
-    l = 66
+    sorted_ls = sorted(list(set(params[:, 1])))
+    l = sorted_ls[int(math.floor((len(sorted_ls) * l_size)))]
 
     valid_params = np.vstack([p for p in params if p[1] == l])
     k, l = valid_params[-1]
     assert k == np.max(valid_params[:, 0])
-    plot_collision_prob(ks=valid_params[:, 0], ls=[l])
+
+    if plot:
+        plot_collision_prob(ks=valid_params[:, 0], ls=[l])
 
     k_a = 1
 
@@ -1277,38 +1322,44 @@ def alpha_v_lsh_nn_minhash(n_dims):
 
     corr = get_pct_neighb_correct(query_data, neighbs, d1, container.data, jaccard)
     mean_size = np.mean([len(n) for n in neighbs])
-    print(corr)
-    print(mean_size)
+    print('LSH')
+    print(f'hit ratio {corr}')
+    print(f'neighb size {mean_size}')
 
     corr_a = get_pct_neighb_correct(query_data, neighbs, d1, alpha_container.data, jaccard)
     mean_size_a = np.mean([len(n) for n in neighbs_a])
-    print(corr_a)
-    print(mean_size_a)
+    print('alpha-LSH')
+    print(f'hit ratio {corr_a}')
+    print(f'neighb size {mean_size_a}')
 
-    return
+    return l, mean_size, mean_size_a
 
 
-def alpha_v_lsh_nn_pstable(n_dims, d1, p1, l_size, seed=42):
+def alpha_v_lsh_nn_pstable(n_dims, d1, p1, l_size, seed=42, plot=False, gen_data='rand'):
+
+    get_param_fn = get_r_k_l_pstable
 
     # Distance below which items are considered near neighbors
-    d1 = 2
-    posi_rate = 0.9
+    d1 = d1
+    posi_rate=p1
 
     # This has no effect, there is no limitation on false positives
-    err_width = 1.0
-    d2 = 1.0
+    d2 = d1 + 0.01
     false_rate = 1.0
 
-    params = get_r_k_l_pstable(d1, d2, posi_rate, false_rate)
+    params = get_param_fn(d1, d2, posi_rate=posi_rate, false_rate=false_rate)
 
     # Fix number of tables
     sorted_ls = sorted(list(set(params[:, 2])))
     l = sorted_ls[int(len(sorted_ls) * l_size)]
 
+    # Get the highest possible k value for a fixed l
     valid_params = np.vstack([p for p in params if p[2] == l])
     r, k, l = valid_params[-1]
     assert k == np.max(valid_params[:, 1])
-    plot_collision_prob_pstable(ks=valid_params[:, 1], ls=[l], rs=[r])
+
+    if plot:
+        plot_collision_prob_pstable(ks=valid_params[:, 1], ls=[l], rs=[r])
 
     k_a = 1
 
@@ -1326,7 +1377,12 @@ def alpha_v_lsh_nn_pstable(n_dims, d1, p1, l_size, seed=42):
     alpha_container = LSHContainer(k=k_a, l=l, lsh_cls=AlphaLSH, lsh_args=alpha_lsh_args, seed=seed)
 
     query_data = gen_uni_rand_data_real(100, n_dims)
-    data = gen_planted_rand_data_real(query_data, n_data=1000, Rs=[d1], err_width=0, epsilon=3.0)
+    if gen_data == 'planted':
+        data = gen_planted_rand_data_real(query_data, n_data=1000, Rs=[d1], err_width=0, epsilon=6.0)
+    elif gen_data == 'rand':
+        data = gen_uni_rand_data_real(1000, n_dims)
+    else:
+        raise Exception()
 
     idxs = container.hash(data)
     idxs_a = alpha_container.hash(data)
@@ -1350,25 +1406,34 @@ def alpha_v_lsh_nn_pstable(n_dims, d1, p1, l_size, seed=42):
     return l, mean_size, mean_size_a
 
 
-def test_approx_near_neighbors():
+def test_approx_near_neighbors(scheme='MinHash', x_res=20, n_trials=3, gen_data='rand'):
     # Does tuning r in vanilla LSH, or alpha in tunable-LSH give better results when searching for near-neighbors?
-    # print('minhash')
-    # alpha_v_lsh_nn_minhash(1000)
-    print('pstable')
-    p1 = 0.99
-    # d1s = np.arange(0.1, 5, 0.5)
-    d1 = 1
+
+    print(scheme)
+
+    if scheme == 'MinHash':
+        if gen_data == 'planted':
+            return
+        p1 = 0.9
+        d1 = 0.67
+        alpha_v_lsh_nn_fn = alpha_v_lsh_nn_minhash
+
+    elif scheme == 'p-Stable':
+        if gen_data == 'rand':
+            return
+        p1 = 0.99
+        d1 = 1
+        alpha_v_lsh_nn_fn = alpha_v_lsh_nn_pstable
 
     # Iterate over parameter l in terms of where in the range of admissible ls it falls
-    l_sizes = np.arange(0, 1, 1/20)
-    seeds = np.random.randint(0, 1e10, 3)
+    l_sizes = np.arange(0, 1, 1/x_res)
+    seeds = np.random.randint(0, 1e10, n_trials)
     ls = []
     n_nbss = np.empty((len(l_sizes), len(seeds)))
     n_nbss_a = n_nbss.copy()
     for li, l_size in enumerate(l_sizes):
-        n_nbs, n_nbs_a = [], []
         for si, seed in enumerate(seeds):
-            l, n_nbs, n_nbs_a = alpha_v_lsh_nn_pstable(1000, d1, p1, l_size, seed=seed)
+            l, n_nbs, n_nbs_a = alpha_v_lsh_nn_fn(1000, d1, p1, l_size, seed=seed, gen_data=gen_data)
             n_nbss[li, si] = n_nbs
             n_nbss_a[li, si] = n_nbs_a
         print(f'l: {l}')
@@ -1377,8 +1442,10 @@ def test_approx_near_neighbors():
     plt.errorbar(ls, n_nbss_a.mean(axis=1), yerr=n_nbss_a.std(axis=1), label='alpha-LSH')
     plt.xlabel('t')
     plt.ylabel('neighborhood size')
+    plt.title(f'{scheme}; p1={p1}, d1={d1}')
     plt.legend()
-    plt.savefig(os.path.join(figs_dir, 'nb_size_X_l'))
+    plt.savefig(os.path.join(figs_dir, f'{scheme}_{gen_data}_nb_size_X_l'))
+    plt.close()
 
 
 def main():
@@ -1387,13 +1454,31 @@ def main():
     l = 20
     plot_collision_prob_pstable(ks=[i+1 for i in range(l)], ls=[l], rs=[1])
     plot_collision_prob_pstable_alpha(k=1, l=l, r=1)
+    plot_collision_prob(ks=[i+1 for i in range(l)], ls=[l])
+    plot_collision_prob_alpha(k=1, l=l)
 
-    test_approx_near_neighbors()
+    # Try searching for near-neighbors. Show that alpha tuning leads to fewer false positives than tuning the number of
+    # bands given fixed number of tables.
+    x_res = 20
+    n_trials = 10
+    schemes =[
+        # 'MinHash',
+        'p-Stable'
+    ]
+    gen_datas = [
+        # 'rand',
+        'planted',
+    ]
+    [
+        test_approx_near_neighbors(scheme=s, x_res=x_res, n_trials=n_trials, gen_data=d)
+        for s in schemes
+        for d in gen_datas
+    ]
 
     return
 
     # Get ranked neighbors on synthetic data (more cleverly constructed for p-stable distributions)
-    # get_ranked_neighbs(scheme='MinHash')
+    get_ranked_neighbs(scheme='MinHash')
     get_ranked_neighbs(scheme='pStable')
 
     # Look at effect of alpha on neighborhood size/similarity, fixing other parameters
