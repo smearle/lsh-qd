@@ -1367,7 +1367,7 @@ def alpha_v_lsh_nn_pstable(n_dims, d1, p1, l_size, seed=42, plot=False, gen_data
 
     k_a = 1
 
-    d_test = d1 + 0.1
+    d_test = d1 + 5
     d_test_coll_prob = collision_prob_pstable([d_test], r, k, l, alpha=1)
     print(f'test distance: {d_test}, has collision prob: {d_test_coll_prob} under LSH')
 
@@ -1458,6 +1458,8 @@ def test_approx_near_neighbors(scheme='MinHash', x_res=20, n_trials=3, gen_data=
     plt.close()
 
     plt.plot(ls, d_test_coll_probs.mean(axis=1))
+    plt.savefig(os.path.join(figs_dir, f'test_probs_{scheme}_{gen_data}_nb_size_X_l'))
+    plt.close()
 
 
 def main():
