@@ -653,7 +653,7 @@ def gen_uni_rand_data_real(n_data, n_dims):
     data *= 0.72
 
     dists = (np.linalg.norm(data[None,...] - data[:, None,...], axis=-1))
-    print(dists.mean(), dists.max(), dists.min())
+    # print('data mean, max, min distances:', dists.mean(), dists.max(), dists.min())
 
     return data
 
@@ -993,13 +993,14 @@ def get_r_k_l_pstable(posi_dist, false_dist, posi_rate=.90, false_rate=.10):
 
     # TODO: I've seen a giant spike in alpha-LSH neighborhood size with 400 < n_cell < 500. Investigate this!!!
     k_n_cell = 1000  # The range of values [1, n_cell+1] to check for k and l
-    l_n_cell = 400
+    l_n_cell = 350
 
 
     # pStable parameter search
     # k is number of bands -- size of compressed representation produced by an LSH instance
     # l is the number of LSH instances
-    rs = [0.5]  # hardcoded
+    rs = [0.01]  # hardcoded
+    # rs = [0.1]  # hardcoded
     ks = np.arange(k_n_cell) + 1
     ls = np.arange(l_n_cell) + 1
 
@@ -1217,7 +1218,7 @@ def get_ranked_neighbs(scheme='pStable', gen_data='planted'):
         )
         query_data = gen_uni_rand_data_real(n_query, n_dims)
         if gen_data == 'planted':
-            data = gen_planted_rand_data_real(query_data, n_data, Rs=radii, err_width=err_width, epsilon=0.3)
+            data = gen_planted_rand_data_real(query_data, n_data, Rs=radii, err_width=err_width, epsilon=50)
         else:
             data = gen_uni_rand_data_real(n_data, n_dims)
 
@@ -1390,6 +1391,7 @@ def alpha_v_lsh_nn_pstable(n_dims, d1, p1, l_size, seed=42, plot=False, gen_data
     elif gen_data == 'rand':
         data = gen_uni_rand_data_real(1000, n_dims)
     else:
+        print(gen_data)
         raise Exception()
 
     idxs = container.hash(data)
@@ -1427,10 +1429,13 @@ def test_approx_near_neighbors(scheme='MinHash', x_res=20, n_trials=3, gen_data=
         alpha_v_lsh_nn_fn = alpha_v_lsh_nn_minhash
 
     elif scheme == 'p-Stable':
+        p1 = 0.9
         if gen_data == 'rand':
-            return
-        p1 = 0.99
-        d1 = 1
+            d1 = .5
+        elif gen_data == 'planted':
+            d1 = 0.2
+        else:
+            raise Exception
         alpha_v_lsh_nn_fn = alpha_v_lsh_nn_pstable
 
     # Iterate over parameter l in terms of where in the range of admissible ls it falls
@@ -1473,10 +1478,11 @@ def main():
 
     # Try searching for near-neighbors. Show that alpha tuning leads to fewer false positives than tuning the number of
     # bands given fixed number of tables.
-    x_res = 20
-    n_trials = 10
-    test_approx_near_neighbors(scheme='MinHash', x_res=x_res, n_trials=n_trials, gen_data='rand')
-    test_approx_near_neighbors(scheme='p-Stable', x_res=x_res, n_trials=n_trials, gen_data='planted')
+    x_res = 5
+    n_trials = 1
+    # test_approx_near_neighbors(scheme='MinHash', x_res=x_res, n_trials=n_trials, gen_data='rand')
+    test_approx_near_neighbors(scheme='p-Stable', x_res=x_res, n_trials=n_trials, gen_data='rand')
+    # test_approx_near_neighbors(scheme='p-Stable', x_res=x_res, n_trials=n_trials, gen_data='planted')
 
     return
 
