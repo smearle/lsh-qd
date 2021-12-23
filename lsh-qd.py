@@ -609,7 +609,7 @@ def plot_collision_prob_alpha(k, l):
 
     for ai, a in enumerate(alphas):
         p_coll = collision_prob_alpha(v, k, l, alpha=a)
-        label = f'alpha = {int(a)}' if ai == 0 or ai == len(alphas) else None
+        label = f'alpha = {int(a)}' if ai == 0 or ai == len(alphas) - 1 else None
         plt.plot(1 - v, p_coll, label=label, color=default_colors[1], alpha=alpha_fn(ai))
 
     plt.xlabel('item distance')
@@ -1301,6 +1301,10 @@ def alpha_v_lsh_nn_minhash(n_dims, d1, p1, l_size, seed=42, plot=False, gen_data
 
     k_a = 1
 
+    d_test = max(0, 1 - (d1 + 0.1))
+    d_test_coll_prob = collision_prob(sim=d_test, k=k, l=l)
+    print(f'test similarity: {d_test}, has collision prob: {d_test_coll_prob}')
+
     alpha = get_alpha_minhash(k_a, l, d1, d2, posi_rate, false_rate)
 
     container = LSHContainer(k=k, l=l, lsh_cls=MinHash)
@@ -1332,7 +1336,7 @@ def alpha_v_lsh_nn_minhash(n_dims, d1, p1, l_size, seed=42, plot=False, gen_data
     print(f'hit ratio {corr_a}')
     print(f'neighb size {mean_size_a}')
 
-    return l, mean_size, mean_size_a
+    return l, mean_size, mean_size_a, d_test_coll_prob
 
 
 def alpha_v_lsh_nn_pstable(n_dims, d1, p1, l_size, seed=42, plot=False, gen_data='rand'):
@@ -1362,6 +1366,10 @@ def alpha_v_lsh_nn_pstable(n_dims, d1, p1, l_size, seed=42, plot=False, gen_data
         plot_collision_prob_pstable(ks=valid_params[:, 1], ls=[l], rs=[r])
 
     k_a = 1
+
+    d_test = d1 + 0.1
+    d_test_coll_prob = collision_prob_pstable([d_test], r, k, l, alpha=1)
+    print(f'test distance: {d_test}, has collision prob: {d_test_coll_prob} under LSH')
 
     alpha = get_alpha_pstable(r, k_a, l, d1, d2, posi_rate, false_rate)
 
@@ -1403,7 +1411,7 @@ def alpha_v_lsh_nn_pstable(n_dims, d1, p1, l_size, seed=42, plot=False, gen_data
     print(f'hit ratio {corr_a}')
     print(f'neighb size {mean_size_a}')
 
-    return l, mean_size, mean_size_a
+    return l, mean_size, mean_size_a, d_test_coll_prob
 
 
 def test_approx_near_neighbors(scheme='MinHash', x_res=20, n_trials=3, gen_data='rand'):
@@ -1431,11 +1439,13 @@ def test_approx_near_neighbors(scheme='MinHash', x_res=20, n_trials=3, gen_data=
     ls = []
     n_nbss = np.empty((len(l_sizes), len(seeds)))
     n_nbss_a = n_nbss.copy()
+    d_test_coll_probs = n_nbss.copy()
     for li, l_size in enumerate(l_sizes):
         for si, seed in enumerate(seeds):
-            l, n_nbs, n_nbs_a = alpha_v_lsh_nn_fn(1000, d1, p1, l_size, seed=seed, gen_data=gen_data)
+            l, n_nbs, n_nbs_a, d_test_coll_prob = alpha_v_lsh_nn_fn(1000, d1, p1, l_size, seed=seed, gen_data=gen_data)
             n_nbss[li, si] = n_nbs
             n_nbss_a[li, si] = n_nbs_a
+            d_test_coll_probs[li, si] = d_test_coll_prob
         print(f'l: {l}')
         ls.append(l)
     plt.errorbar(ls, n_nbss.mean(axis=1), yerr=n_nbss.std(axis=1),  label='LSH')
@@ -1446,6 +1456,8 @@ def test_approx_near_neighbors(scheme='MinHash', x_res=20, n_trials=3, gen_data=
     plt.legend()
     plt.savefig(os.path.join(figs_dir, f'{scheme}_{gen_data}_nb_size_X_l'))
     plt.close()
+
+    plt.plot(ls, d_test_coll_probs.mean(axis=1))
 
 
 def main():
@@ -1461,19 +1473,8 @@ def main():
     # bands given fixed number of tables.
     x_res = 20
     n_trials = 10
-    schemes =[
-        # 'MinHash',
-        'p-Stable'
-    ]
-    gen_datas = [
-        # 'rand',
-        'planted',
-    ]
-    [
-        test_approx_near_neighbors(scheme=s, x_res=x_res, n_trials=n_trials, gen_data=d)
-        for s in schemes
-        for d in gen_datas
-    ]
+    test_approx_near_neighbors(scheme='MinHash', x_res=x_res, n_trials=n_trials, gen_data='rand')
+    test_approx_near_neighbors(scheme='p-Stable', x_res=x_res, n_trials=n_trials, gen_data='planted')
 
     return
 
