@@ -335,7 +335,7 @@ class LSHContainer():
         '''
         input_data_idxs = np.empty(shape=input_data.shape[0], dtype=int)
 
-        for row_idx, data_point in tqdm(enumerate(input_data), desc="Hashing data", total=input_data.shape[0]):
+        for row_idx, data_point in tqdm(enumerate(input_data), desc="Hashing data", total=input_data.shape[0], leave=False):
             data_idx, bucket_ids = self.lsh.hash(data_point)
             assert data_idx not in self.data
             self.data[data_idx] = data_point
@@ -1266,7 +1266,7 @@ def get_pct_neighb_correct(queries, neighbs, d1, data, dist_fn):
         ts.append(n_true / len(true_idxs))
     if len(true_idxs) == 0:
         pass
-    print(f'true neighb size {len(true_idxs)}')
+    # print(f'true neighb size {len(true_idxs)}')
 
     return np.mean(ts)
 
@@ -1296,6 +1296,9 @@ def alpha_v_lsh_nn_minhash(n_dims, d1, p1, l_size, seed=42, plot=False, gen_data
     k, l = valid_params[-1]
     assert k == np.max(valid_params[:, 0])
 
+    print(f"\nNUMBER OF TABLES: {l}")
+    print(f"LARGEST ALLOWABLE BAND SIZE: {k}")
+
     if plot:
         plot_collision_prob(ks=valid_params[:, 0], ls=[l])
 
@@ -1303,9 +1306,10 @@ def alpha_v_lsh_nn_minhash(n_dims, d1, p1, l_size, seed=42, plot=False, gen_data
 
     d_test = max(0, 1 - (d1 + 0.1))
     d_test_coll_prob = collision_prob(sim=d_test, k=k, l=l)
-    print(f'test similarity: {d_test}, has collision prob: {d_test_coll_prob}')
+    # print(f'test similarity: {d_test}, has collision prob: {d_test_coll_prob}')
 
     alpha = get_alpha_minhash(k_a, l, d1, d2, posi_rate, false_rate)
+    print(f"LARGEST ALLOWABLE ALPHA: {alpha}")
 
     container = LSHContainer(k=k, l=l, lsh_cls=MinHash)
     alpha_container = LSHContainer(k=k_a, l=l)
@@ -1326,15 +1330,15 @@ def alpha_v_lsh_nn_minhash(n_dims, d1, p1, l_size, seed=42, plot=False, gen_data
 
     corr = get_pct_neighb_correct(query_data, neighbs, d1, container.data, jaccard)
     mean_size = np.mean([len(n) for n in neighbs])
-    print('LSH')
-    print(f'hit ratio {corr}')
-    print(f'neighb size {mean_size}')
+    # print('LSH')
+    # print(f'hit ratio {corr}')
+    print(f'AVERAGE LSH SCAN SIZE: {mean_size}')
 
     corr_a = get_pct_neighb_correct(query_data, neighbs, d1, alpha_container.data, jaccard)
     mean_size_a = np.mean([len(n) for n in neighbs_a])
-    print('alpha-LSH')
-    print(f'hit ratio {corr_a}')
-    print(f'neighb size {mean_size_a}')
+    # print('alpha-LSH')
+    # print(f'hit ratio {corr_a}')
+    print(f'AVERAGE ALPHA-LSH SCAN SIZE: {mean_size_a}')
 
     return l, mean_size, mean_size_a, d_test_coll_prob
 
@@ -1373,6 +1377,10 @@ def alpha_v_lsh_nn_pstable(n_dims, d1, p1, l_size, seed=42, plot=False, gen_data
 
     alpha = get_alpha_pstable(r, k_a, l, d1, d2, posi_rate, false_rate)
 
+    print(f"\nNUMBER OF TABLES: {l}")
+    print(f"LARGEST ALLOWABLE BAND SIZE: {k}")
+    print(f"LARGEST ALLOWABLE ALPHA: {alpha}")
+
     lsh_args = {
         'r': r,
         'n_dims': n_dims,
@@ -1401,15 +1409,16 @@ def alpha_v_lsh_nn_pstable(n_dims, d1, p1, l_size, seed=42, plot=False, gen_data
 
     corr = get_pct_neighb_correct(query_data, neighbs, d1, container.data, l2_norm)
     mean_size = np.mean([len(n) for n in neighbs])
-    print('LSH')
-    print(f'hit ratio {corr}')
-    print(f'neighb size {mean_size}')
+    # print('LSH')
+    # print(f'hit ratio {corr}')    
+    print(f'AVERAGE LSH SCAN SIZE: {mean_size}')
+
 
     corr_a = get_pct_neighb_correct(query_data, neighbs, d1, alpha_container.data, l2_norm)
     mean_size_a = np.mean([len(n) for n in neighbs_a])
-    print('alpha-LSH')
-    print(f'hit ratio {corr_a}')
-    print(f'neighb size {mean_size_a}')
+    # print('alpha-LSH')
+    # print(f'hit ratio {corr_a}')
+    print(f'AVERAGE ALPHA-LSH SCAN SIZE: {mean_size_a}')
 
     return l, mean_size, mean_size_a, d_test_coll_prob
 
@@ -1465,17 +1474,17 @@ def test_approx_near_neighbors(scheme='MinHash', x_res=20, n_trials=3, gen_data=
 def main():
 
     # Generate some example collision curves to demonstrate alpha-LSH's finer level of control
-    l = 20
-    plot_collision_prob_pstable(ks=[i+1 for i in range(l)], ls=[l], rs=[1])
-    plot_collision_prob_pstable_alpha(k=1, l=l, r=1)
-    plot_collision_prob(ks=[i+1 for i in range(l)], ls=[l])
-    plot_collision_prob_alpha(k=1, l=l)
+    # l = 20
+    # plot_collision_prob_pstable(ks=[i+1 for i in range(l)], ls=[l], rs=[1])
+    # plot_collision_prob_pstable_alpha(k=1, l=l, r=1)
+    # plot_collision_prob(ks=[i+1 for i in range(l)], ls=[l])
+    # plot_collision_prob_alpha(k=1, l=l)
 
     # Try searching for near-neighbors. Show that alpha tuning leads to fewer false positives than tuning the number of
     # bands given fixed number of tables.
-    x_res = 20
-    n_trials = 10
-    test_approx_near_neighbors(scheme='MinHash', x_res=x_res, n_trials=n_trials, gen_data='rand')
+    x_res = 10
+    n_trials = 3
+    # test_approx_near_neighbors(scheme='MinHash', x_res=x_res, n_trials=n_trials, gen_data='rand')
     test_approx_near_neighbors(scheme='p-Stable', x_res=x_res, n_trials=n_trials, gen_data='planted')
 
     return
