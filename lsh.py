@@ -1,4 +1,5 @@
 import math
+import heapq
 import numpy as np
 from collections import defaultdict
 
@@ -234,6 +235,45 @@ class MultiProbeLsh(pStableHash):
         # X[i][j][delta] represents the distance in the i'th table and the j'th band from the query
         # point to the boundary of the bucket that is delta away (though X[i][j][0] always = 0)
         X = np.stack([zeros, positive_boundary_dists, negative_boundary_dists], axis=2)
+
+        # This matrix stores all of the distances from the query point to tis interval boundaries.
+        # X[i, j] represents the distance from in the i
+        X = np.concatenate([negative_boundary_dists, positive_boundary_dists], axis=1)
+
+        sorted_indices = np.argsort(X, axis=1)
+
+        # The above indices are from 0 to 2k-1, and here we create two new arrays which give us
+        # the band index and the actual perturbation, in ascending order of score along axis 1
+        sorted_band_idxs = sorted_indices % self.k
+        sorted_perturbations = (sorted_indices // self.k * 2) - 1
+
+
+        # Need opertaion that maps from index in [0, 2k-1] to {-1, 1} X {0, ..., k-1}:
+        # f(idx): (idx // k * 2) - 1, idx % k
+
+
+        # Create a min-heap to store all of our potential perturbations. Each entry in the head will look
+        # like (score, table_idx, [(band_idx, perturbation), (band_idx, perturbation), ...]). To begin,
+        # the heap will contain (score, table_idx, [(best_perturbation_idx, best_perturbation)]) for each
+        # table_idx in {0, ..., l-1}
+        heap = [(X[table_idx][sorted_indices[table_idx][0]], table_idx, [(sorted_band_idxs[table_idx][sorted_indices[table_idx][0]], sorted_perturbations[table_idx][sorted_indices[table_idx][0]])]) for table_idx in range(self.l)]
+
+        heap = []
+        for table_idx in range(self.l):
+            best_band_and_perturbation_idx = sorted_indices[table_idx][0] # a value between 0 and 2k-1
+            best_band_idx = sorted_band_idxs[table_idx][0] # a value between 0 and k-1
+            best_perturbation = sorted_perturbations[table_idx][0] # -1 or 1
+
+            score = X[table_idx][best_band_and_perturbation_idx]
+
+            heap.append((score, table_idx, [(best_band_idx, best_perturbation)]))
+
+        heapq.heapify(heap)
+
+        # X is [l, 2k] where the first k elements are delta = 1 for each band, and the last k are delta = -1
+        # i \in [0, 2k-1] --> [1, j] or [-1, j']
+
+        sorted_index = np.argsort(X, axis=2)
 
 if __name__ == "__main__":
     k = 5
