@@ -72,13 +72,12 @@ class pStableHash():
         for hash_idx, band_funcs in enumerate(self.hash_functions):
 
             # Compute the data point's signature under those hash functions, and its corresponding bucket id
-            proj_values = np.array([fn(y) for fn in band_funcs])
-            signature = np.floor(proj / self.r)
-            bucket_id = tuple(signature)
+            table_proj_values = np.array([fn(y) for fn in band_funcs])
+            table_bucket_id = tuple(np.floor(proj / self.r))
 
             # Add the data index to the current bucket
-            self.tables[hash_idx][bucket_id].append(self.cur_data_idx)
-            all_bucket_ids.append(bucket_id)
+            self.tables[hash_idx][table_bucket_id].append(self.cur_data_idx)
+            all_bucket_ids.append(table_bucket_id)
 
         # Associate the bucket ids with the current data point
         self.data_idx_to_bucket_ids[self.cur_data_idx] = all_bucket_ids
@@ -123,12 +122,11 @@ class pStableHash():
 
         for hash_idx, band_funcs in enumerate(self.hash_functions):
 
-            proj_values = np.array([fn(y) for fn in band_funcs])
-            signature = np.floor(proj / self.r)
-            bucket_id = tuple(signature)
+            table_proj_values = np.array([fn(y) for fn in band_funcs])
+            table_bucket_id = tuple(np.floor(proj / self.r))
 
             # Keep a count of number of collisions with each other item
-            for data_index in self.tables[hash_idx][bucket_id]:
+            for data_index in self.tables[hash_idx][table_bucket_id]:
                 collision_freqs[data_index] += 1
 
         return collision_freqs
@@ -206,16 +204,22 @@ class MultiProbeLsh(pStableHash):
 
     def query(self, y, num_perturbations):
 
-        projection_values = []
         bucket_ids = []
+        negative_boundary_dists = []
+        positive_boundary_dists = []
 
-        # Compute the signature of y under each of our l tables
+        # Compute the bucket id of y under each of our l tables
         for hash_idx, band_funcs in enumerate(self.hash_functions):
 
-            proj_values = np.array([fn(y) for fn in band_funcs])
-            signature = np.floor(proj / self.r)
-            bucket_id = tuple(signature)
+            table_proj_values = np.array([fn(y) for fn in band_funcs])
+            table_bucket_id = np.floor(proj / self.r)
 
-            bucket_ids.append(bucket_id)
+            # Compute the distance from the query point to the positive and negative boundaries
+            # of its interval, which will be used to determine the ordering of perturbation vectors
+            table_negative_boundary_dists = table_proj_values - (table_bucket_id * self.r)
+            table_positive_boundary_dists = self.r - table_negative_boundary_dists
 
+            bucket_ids.append(tuple(table_bucket_id))
+            negative_boundary_dists.append(table_negative_boundary_dists)
+            positive_boundary_dists.append(table_positive_boundary_dists)
 
