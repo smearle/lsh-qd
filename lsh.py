@@ -70,7 +70,7 @@ class pStableHash():
 
             # Compute the data point's signature under those hash functions, and its corresponding bucket id
             signature = [fn(x) for fn in band_funcs]
-            bucket_id = hash(tuple(signature))
+            bucket_id = tuple(signature)
 
             # Add the data index to the current bucket
             self.tables[hash_idx][bucket_id].append(self.cur_data_idx)
@@ -120,7 +120,7 @@ class pStableHash():
         for hash_idx, band_funcs in enumerate(self.hash_functions):
 
             signature = [fn(y) for fn in band_funcs]
-            bucket_id = hash(tuple(signature))
+            bucket_id = tuple(signature)
 
             # Keep a count of number of collisions with each other item
             for data_index in self.tables[hash_idx][bucket_id]:
@@ -196,5 +196,7 @@ class MultiProbeLsh(pStableHash):
     '''
     TODO
     '''
-    def __init__(self):
-        raise NotImplementedError
+    def __init__(self, k, l, r, n_dims, seed):
+        super().__init__(k, l, r, n_dims, seed)
+
+    def query(self, y, num_perturbations):
