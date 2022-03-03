@@ -1,5 +1,6 @@
 import math
 import numpy as np
+from collections import defaultdict
 
 class pStableHash():
     """
@@ -72,8 +73,8 @@ class pStableHash():
         for hash_idx, band_funcs in enumerate(self.hash_functions):
 
             # Compute the data point's signature under those hash functions, and its corresponding bucket id
-            table_proj_values = np.array([fn(y) for fn in band_funcs])
-            table_bucket_id = tuple(np.floor(proj / self.r))
+            table_proj_values = np.array([fn(x) for fn in band_funcs])
+            table_bucket_id = tuple(np.floor(table_proj_values / self.r).astype(np.int32))
 
             # Add the data index to the current bucket
             self.tables[hash_idx][table_bucket_id].append(self.cur_data_idx)
@@ -123,7 +124,7 @@ class pStableHash():
         for hash_idx, band_funcs in enumerate(self.hash_functions):
 
             table_proj_values = np.array([fn(y) for fn in band_funcs])
-            table_bucket_id = tuple(np.floor(proj / self.r))
+            table_bucket_id = tuple(np.floor(table_proj_values / self.r).astype(np.int32))
 
             # Keep a count of number of collisions with each other item
             for data_index in self.tables[hash_idx][table_bucket_id]:
@@ -155,7 +156,7 @@ class VanillaLSH(pStableHash):
             y: a query_point
         '''
 
-        collision_freqs = self.lsh._get_collision_freqs(y)
+        collision_freqs = self._get_collision_freqs(y)
         neighbor_idxs = list(collision_freqs.keys()) # the collision_freqs dict only includes elements that collide at least once
 
         return neighbor_idxs
@@ -189,7 +190,7 @@ class AlphaLSH(pStableHash):
                 neighbor
         '''
 
-        collision_freqs = self.lsh._get_collision_freqs(y)
+        collision_freqs = self._get_collision_freqs(y)
         neighbor_idxs = [idx for idx, freq in collision_freqs.items() if freq >= alpha]
 
         return neighbor_idxs
@@ -212,7 +213,7 @@ class MultiProbeLsh(pStableHash):
         for hash_idx, band_funcs in enumerate(self.hash_functions):
 
             table_proj_values = np.array([fn(y) for fn in band_funcs])
-            table_bucket_id = np.floor(proj / self.r)
+            table_bucket_id = np.floor(table_proj_values / self.r).int()
 
             # Compute the distance from the query point to the positive and negative boundaries
             # of its interval, which will be used to determine the ordering of perturbation vectors
@@ -223,3 +224,33 @@ class MultiProbeLsh(pStableHash):
             negative_boundary_dists.append(table_negative_boundary_dists)
             positive_boundary_dists.append(table_positive_boundary_dists)
 
+
+        # Negative / positive boundary dists are l by k. Ultimately, we want a matrix X to be (l, k, 3)
+        zeros = np.zeros(self.l, self.k)
+        negative_boundary_dists = np.array(negative_boundary_dists)
+        positive_boundary_dists = np.array(positive_boundary_dists)
+
+        # This matrix stores all of the distances from the query point to its interval boundaries. 
+        # X[i][j][delta] represents the distance in the i'th table and the j'th band from the query
+        # point to the boundary of the bucket that is delta away (though X[i][j][0] always = 0)
+        X = np.stack([zeros, positive_boundary_dists, negative_boundary_dists], axis=2)
+
+if __name__ == "__main__":
+    k = 5
+    l = 10
+    r = 1
+    n_dims = 100
+    seed = 42
+
+    vanilla = VanillaLSH(k, l ,r, n_dims, seed)
+    alpha = AlphaLSH(k, l ,r, n_dims, seed)
+    multi = MultiProbeLsh(k, l ,r, n_dims, seed)
+
+    point = np.random.random(n_dims)
+
+    print(vanilla.hash(point))
+    print(alpha.hash(point))
+    print(multi.hash(point))
+
+    print("\n\n")
+    print(vanilla.query(point))
