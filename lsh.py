@@ -49,9 +49,12 @@ class pStableHash():
         # Sample some random offset to nullify in expectation the effect of bin border placement
         b = np.random.random() * self.r
 
+
+        # The hash function here actually only projects the item onto a random line, it doesn't assign it to a 
+        # random interval. That responsibiltiy belongs to hash() and _get_collision_freqs(), which need to divide
+        # the projected value by self.r and apply a floor operator
         def hash_func(x):
-            # Project the item to a line and discretize the line into intervals and return the intereval's index
-            return math.floor((x.T @ a + b) / self.r)
+            return x.T @ a + b
 
         return hash_func
 
@@ -69,7 +72,8 @@ class pStableHash():
         for hash_idx, band_funcs in enumerate(self.hash_functions):
 
             # Compute the data point's signature under those hash functions, and its corresponding bucket id
-            signature = [fn(x) for fn in band_funcs]
+            proj_values = np.array([fn(y) for fn in band_funcs])
+            signature = np.floor(proj / self.r)
             bucket_id = tuple(signature)
 
             # Add the data index to the current bucket
@@ -119,7 +123,8 @@ class pStableHash():
 
         for hash_idx, band_funcs in enumerate(self.hash_functions):
 
-            signature = [fn(y) for fn in band_funcs]
+            proj_values = np.array([fn(y) for fn in band_funcs])
+            signature = np.floor(proj / self.r)
             bucket_id = tuple(signature)
 
             # Keep a count of number of collisions with each other item
@@ -200,3 +205,17 @@ class MultiProbeLsh(pStableHash):
         super().__init__(k, l, r, n_dims, seed)
 
     def query(self, y, num_perturbations):
+
+        projection_values = []
+        bucket_ids = []
+
+        # Compute the signature of y under each of our l tables
+        for hash_idx, band_funcs in enumerate(self.hash_functions):
+
+            proj_values = np.array([fn(y) for fn in band_funcs])
+            signature = np.floor(proj / self.r)
+            bucket_id = tuple(signature)
+
+            bucket_ids.append(bucket_id)
+
+
