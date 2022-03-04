@@ -283,7 +283,7 @@ class MultiProbeLsh(pStableHash):
             return True
 
 
-        assert num_perturbations < 2**self.k, "Number of perturbations was too high"
+        assert num_perturbations < (2**self.k) * self.l, "Number of perturbations was too high"
 
 
         # Generate perturbation sets in ascending order of score using the algorithm outlined in the 
@@ -334,17 +334,40 @@ class MultiProbeLsh(pStableHash):
         return neighbors
 
 if __name__ == "__main__":
-    k = 5
-    l = 10
+    import h5py
+    import matplotlib.pyplot as plt
+    from tqdm import tqdm
+    from pdb import set_trace as TT
+
+    # file = h5py.File("data/fashion-mnist-784-euclidean.hdf5", "r")
+    file = h5py.File("data/sift-128-euclidean.hdf5", "r")
+
+    
+    train, test, true_neighbors = file["train"], file["test"], file["neighbors"] 
+
+    k = 6
+    l = 100
     r = 1
-    n_dims = 100
+    n_dims = 128
     seed = 42
 
     vanilla = VanillaLSH(k, l ,r, n_dims, seed)
     alpha = AlphaLSH(k, l ,r, n_dims, seed)
     multi = MultiProbeLsh(k, l ,r, n_dims, seed)
 
-    point = np.random.random(n_dims)
+    for data_point in tqdm(train[:100000], desc="Hashing"):
+        multi.hash(data_point / 128)
+
+    test_idx = 42
+    returned_neighbors = multi.query(test[test_idx] / 128, 50)
+    actual_neighbors = true_neighbors[test_idx]
+
+    recall = len(set(returned_neighbors).intersection(set(actual_neighbors))) / len(actual_neighbors)
+
+    print("Returned neighbors: ", sorted(returned_neighbors))
+    print("Actual neighbors: ", sorted(actual_neighbors))
+    print(f"Recall: {'%.3f' % recall}")
+    exit()
 
     print(vanilla.hash(point))
     print(alpha.hash(point))
