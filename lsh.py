@@ -335,38 +335,113 @@ class MultiProbeLsh(pStableHash):
 
 if __name__ == "__main__":
     import h5py
-    import matplotlib.pyplot as plt
-    from tqdm import tqdm
+    import math
     from pdb import set_trace as TT
+    
+    import matplotlib.pyplot as plt
+    from scipy import integrate
+    from tqdm import tqdm
 
-    # file = h5py.File("data/fashion-mnist-784-euclidean.hdf5", "r")
-    file = h5py.File("data/sift-128-euclidean.hdf5", "r")
+
+    def f_G(x):
+        """
+        Gaussian distribution density function. Helper for calculating p-stable collision probability
+        Args:
+            x:
+        Returns:
+        """
+        return np.exp(-x**2/2) / math.sqrt(2*math.pi)
+
+
+    def collision_prob_pstable(dists, r, k, l):
+        """
+        Args:
+            sim:
+            r: the width of the buckets in the projections
+            k: number of projections (bands)
+            l: number of hash tables
+        Returns:
+            an integer or 1D vector of collision probabilities in [0, 1]
+        """
+        p_projs = np.empty(len(dists))
+
+        for di, d in enumerate(dists):
+            if d == 0:
+                p_projs[di] = 1
+                continue
+            result = integrate.quad(lambda t: (1 / d) * f_G(t / d) * (1 - (t / r)), 0, r)
+            p_proj = 2 * result[0]
+            p_projs[di] = p_proj
+
+        coll_probs = 1 - (1 - p_projs ** k) ** l
+
+        return coll_probs
+
+    file = h5py.File("data/fashion-mnist-784-euclidean.hdf5", "r")
+    # file = h5py.File("data/sift-128-euclidean.hdf5", "r")
 
     
-    train, test, true_neighbors = file["train"], file["test"], file["neighbors"] 
+    train, test, true_neighbors, neighbor_dists = file["train"], file["test"], file["neighbors"], file["distances"] 
 
-    k = 6
-    l = 100
-    r = 1
-    n_dims = 128
+
+
+
+    # k = 1
+    # l = 40
+    # r = 100
+    n_dims = 784
     seed = 42
+
+
+    # pbar = tqdm(total=49*19*30, desc="Doing math")
+    # for k in range(1, 20):
+    #     for l in range(20, 50):
+    #         for r in range(76, 125):
+    #             test_idx = np.random.randint(1000)
+    #             point = test[test_idx]
+    #             neighbors = true_neighbors[test_idx]
+    #             distances = neighbor_dists[test_idx]
+
+    #             collision_probs = collision_prob_pstable(distances, r, k, l)
+
+    #             min_c_prob = np.min(collision_probs)
+    #             if min_c_prob > 0.9:
+    #                 print(f"Successful parameter set! r = {r}, k = {k}, l = {l}")
+
+    #             pbar.set_description(f"Doing math: r = {r}, k = {k}, l = {l}")
+    #             pbar.update(1)
+
+    # pbar.close()
+
+        # print(f"For point {idx}, avg. distance to near neighbors = {np.mean(distances)}, avg. collision prob = {np.mean(collision_probs)}")
+
+    k = 1
+    l = 49
+    r = 123
+
 
     vanilla = VanillaLSH(k, l ,r, n_dims, seed)
     alpha = AlphaLSH(k, l ,r, n_dims, seed)
     multi = MultiProbeLsh(k, l ,r, n_dims, seed)
 
-    for data_point in tqdm(train[:100000], desc="Hashing"):
-        multi.hash(data_point / 128)
+    for data_point in tqdm(train, desc="Hashing"):
+        # multi.hash(data_point / 256)
+        vanilla.hash(data_point / 256)
 
-    test_idx = 42
-    returned_neighbors = multi.query(test[test_idx] / 128, 50)
-    actual_neighbors = true_neighbors[test_idx]
+    recalls, precisions = [], []
+    for test_idx in tqdm(range(100), desc="Querying"):
+        # returned_neighbors = multi.query(test[test_idx] / 256, 50)
+        returned_neighbors = vanilla.query(test[test_idx] / 256)
+        actual_neighbors = true_neighbors[test_idx]
 
-    recall = len(set(returned_neighbors).intersection(set(actual_neighbors))) / len(actual_neighbors)
+        recall = len(set(returned_neighbors).intersection(set(actual_neighbors))) / len(actual_neighbors)
+        precision = len(set(returned_neighbors).intersection(set(actual_neighbors))) / len(returned_neighbors)
 
-    print("Returned neighbors: ", sorted(returned_neighbors))
-    print("Actual neighbors: ", sorted(actual_neighbors))
-    print(f"Recall: {'%.3f' % recall}")
+        recalls.append(recall)
+        precisions.append(precision)
+
+    print(f"Average recall: {'%.3f' % np.mean(recalls)}")
+    print(f"Average precision: {'%.3f' % np.mean(precisions)}")
     exit()
 
     print(vanilla.hash(point))
