@@ -132,3 +132,4 @@ dmypy.json
 figs/
 figs/coll_probs/
 data/
+*.tmp
