@@ -145,7 +145,7 @@ class VanillaLSH(pStableHash):
             seed: the random seed
     '''
 
-    def __init__(self, k, l, r, n_dims, seed):
+    def __init__(self, k, l, r, n_dims, seed=42):
         super().__init__(k, l, r, n_dims, seed)
 
     def query(self, y):
@@ -177,7 +177,7 @@ class AlphaLSH(pStableHash):
             seed: the random seed
     '''
 
-    def __init__(self, k, l, r, n_dims, seed):
+    def __init__(self, k, l, r, n_dims, seed=42):
         super().__init__(k, l, r, n_dims, seed)
 
     def query(self, y, alpha=1):
@@ -201,7 +201,7 @@ class MultiProbeLsh(pStableHash):
     '''
     TODO
     '''
-    def __init__(self, k, l, r, n_dims, seed):
+    def __init__(self, k, l, r, n_dims, seed=42):
         super().__init__(k, l, r, n_dims, seed)
 
     def query(self, y, num_perturbations):
