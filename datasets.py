@@ -84,11 +84,51 @@ class ANNBenchmarkDataset():
             # maybe it's worth it for us to store the normalized dataset in a separate file? (Depending on how long the computation takes)
 
 
+class SyntheticDataset():
+    '''
+    A dataset of synthetic data, where neighbors are artificially placed within a radius of each query. Both train and query points are
+    uniformally distributed within the ball of specified radius
+
+    Args:
+        num_dims: the dimension of each data point
+        train_size: the ultimate size of the training set (including the artificially placed neighbors)
+        test_size: the size of the test set
+        neighbors_per_query: the number of artificially placed neighbors for each query
+        max_neighbor_dist: the radius of the ball around each query point where neighbors are placed
+        radius: the radius of the ball within in which all train / query points are placed
+    '''
+    def __init__(self,
+                 num_dims,
+                 train_size,
+                 test_size,
+                 neighbors_per_query,
+                 max_neighbor_dist,
+                 radius=1):
+
+        num_train = train_size - (test_size * neighbors_per_query)
+        assert num_train >= 0, "Size of train set must exceed number of artificially placed neighbors"
+
+        train_data = np.random.normal(0, 1, (num_train, num_dims))
+        train_data = radius * (train_data / np.linalg.norm(train_data, axis=1, keepdims=True))
+        
+        test_data = np.random.normal(0, 1, (test_size, num_dims))
+        test_data = radius * (test_data / np.linalg.norm(test_data, axis=1, keepdims=True))
+
+        neighbor_offsets = np.random.normal(0, 1, (neighbors_per_query * test_size, num_dims))
+        neighbor_offsets = max_neighbor_dist * (neighbor_offsets / np.linalg.norm(neighbor_offsets, axis=1, keepdims=True))
+
+        neighbors = np.repeat(test_data, neighbors_per_query, axis=0) + neighbor_offsets
+
+        self.train_set = np.concatenate([train_data, neighbors])
+        self.test_set = test_data
+
+
 if __name__ == "__main__":
     # parser = argparse.ArgumentParser()
 
     # parser.add_argument()
 
-    d = ANNBenchmarkDataset("fashion-mnist", normalize=True)
+    # d = ANNBenchmarkDataset("fashion-mnist", normalize=True)
+    d = SyntheticDataset(100, 50000, 1000, 10, 0.01)
     print(d.train_set[0])
     # print([max(d.train_set[i]) for i in range(1000)])
