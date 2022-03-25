@@ -26,8 +26,10 @@ class pStableHash():
 
         # Store each of hash function in an array of size (l, k). self.hash_functions[i][j] indicates the j'th band of the 
         # i'th table
-        self.hash_functions = [[self._generate_hash_function() for _ in range(self.k)]
-                               for _ in range(self.l)]
+        # self.hash_functions = [[self._generate_hash_function() for _ in range(self.k)]
+        #                        for _ in range(self.l)]
+
+        self._generate_hash_functions()
 
         # This dictionary maps from a data index to a list of l bucket ids (the hash of vector of k integers) indicating the 
         # keys in each hash table where the index can be found
@@ -51,7 +53,6 @@ class pStableHash():
         # Sample some random offset to nullify in expectation the effect of bin border placement
         b = np.random.random() * self.r
 
-
         # The hash function here actually only projects the item onto a random line, it doesn't assign it to a 
         # random interval. That responsibiltiy belongs to hash() and _get_collision_freqs(), which need to divide
         # the projected value by self.r and apply a floor operator
@@ -59,6 +60,47 @@ class pStableHash():
             return x.T @ a + b
 
         return hash_func
+
+    def _generate_hash_functions(self):
+        
+        # First we need to generate a matrix of random normal vectors that is (l, k, n_dims)
+        self.A = np.random.normal(0, 1, size=(self.l, self.k, self.n_dims))
+
+        # Then we generate a matrix of random offsets that is l by k
+        self.B = np.random.random(size=(self.l, self.k)) * self.r
+
+    def new_hash(self, x):
+
+        all_bucket_ids = []
+
+        # First, we tile the data point into a matrix of size (l, k, n_dims)
+        # tiled_x = np.tile(x, (self.l, self.k, 1))
+
+        # (1, 1, n_dims)
+
+        # Now we compute the effective dot product between our data point and each random normal vector by doing an
+        # element-wise product and summing over the last dimension and add the offsets
+        # projected = np.multiply(self.A, x).sum(axis=2) + self.B
+        projected = np.matmul(self.A, x) + self.B
+
+        # Next, convert these projections to bucket indices by dividing by r and taking the floor
+        bucket_ids = np.floor(projected / self.r).astype(np.int32)
+
+        for table_idx, table_bucket_id in enumerate(bucket_ids):
+            table_bucket_id = tuple(table_bucket_id)
+
+            # Add the data index to the current bucket
+            self.tables[table_idx][table_bucket_id].append(self.cur_data_idx)
+            all_bucket_ids.append(table_bucket_id)
+
+        # Associate the bucket ids with the current data point
+        self.data_idx_to_bucket_ids[self.cur_data_idx] = all_bucket_ids
+        data_idx = self.cur_data_idx
+
+        # Increment the data index
+        self.cur_data_idx += 1
+
+        return data_idx, all_bucket_ids
 
     def hash(self, x):
         '''
@@ -133,6 +175,22 @@ class pStableHash():
 
         return collision_freqs
 
+    def new_get_collision_freqs(self, y):
+        collision_freqs = defaultdict(int)
+
+        projected = np.matmul(self.A, y) + self.B
+        bucket_ids = np.floor(projected / self.r).astype(np.int32)
+
+        for table_idx, table_bucket_id in enumerate(bucket_ids):
+            table_bucket_id = tuple(table_bucket_id)
+
+            # Keep a count of number of collisions with each other item
+            for data_index in self.tables[table_idx][table_bucket_id]:
+                collision_freqs[data_index] += 1
+
+        return collision_freqs
+
+
 class VanillaLSH(pStableHash):
     '''
     TODO
@@ -157,7 +215,7 @@ class VanillaLSH(pStableHash):
             y: a query_point
         '''
 
-        collision_freqs = self._get_collision_freqs(y)
+        collision_freqs = self.new_get_collision_freqs(y)
         neighbor_idxs = list(collision_freqs.keys()) # the collision_freqs dict only includes elements that collide at least once
 
         return neighbor_idxs
