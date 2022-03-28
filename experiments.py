@@ -1,10 +1,13 @@
 import numpy as np
 from tqdm import tqdm
 from multiprocessing import Pool
-# from pathos.multiprocessing import ProcessingPool as Pool
+# from pathos.multiprocessing import ProcessingPool as Pool\
+
+from lsh import VanillaLSH, AlphaLSH, MultiProbeLSH
+from datasets import ANNBenchmarkDataset, SyntheticDataset
 
 
-def evaluate_scheme(lsh_instance, dataset, num_query=-1, verbose=False):
+def evaluate_scheme(lsh_instance, dataset, num_query=-1, verbose=False, **kwargs):
     '''
     Compute the precision and recall of the specified lsh scheme on the provided dataset, taken as the average of the 
     precision and recall on each query point. If specified, will randomly select a subset of the query points to evaluate on
@@ -12,7 +15,7 @@ def evaluate_scheme(lsh_instance, dataset, num_query=-1, verbose=False):
 
     # Hash the train set
     for idx, data_point in tqdm(enumerate(dataset.train_set), desc="Hashing train set", total=len(dataset.train_set)):
-        lsh_instance.new_hash(data_point)
+        lsh_instance.hash(data_point)
 
     # print("Hashing train set")
     # with Pool(4) as pool:
@@ -29,9 +32,7 @@ def evaluate_scheme(lsh_instance, dataset, num_query=-1, verbose=False):
     # Perform the queries, and evaluate the precision / recall for each
     recalls, precisions, num_predictions = [], [], []
     for query_idx in tqdm(query_idxs, desc="Running queries", total=len(query_idxs)):
-        # if isinstance(lsh_instance, MultiProbeLSH): lsh_instance.query([], num_probes)
-        # elif isinstance(lsh_instance, AlphaLSH): 
-        predictions = set(lsh_instance.query(dataset.test_set[query_idx]))
+        predictions = set(lsh_instance.query(dataset.test_set[query_idx], **kwargs))
         neighbors = set(dataset.neighbor_idxs[query_idx])
 
         intersection = predictions.intersection(neighbors)
@@ -77,11 +78,17 @@ def calculate_average_projected_distance(dataset, num_projections=100, num_query
     print("Average projected distance from query point to neighbor:", avg_distance)
 
 if __name__ == "__main__":
-    from datasets import ANNBenchmarkDataset
-    from lsh import VanillaLSH
+    
 
-    dataset = ANNBenchmarkDataset("fashion-mnist", normalize=False)
-    lsh = VanillaLSH(k=65, l=100, r=15000, n_dims=dataset.dimension)
+    # dataset = ANNBenchmarkDataset("fashion-mnist", normalize=False)
+    # lsh = VanillaLSH(k=65, l=100, r=15000, n_dims=dataset.dimension)
 
-    evaluate_scheme(lsh, dataset, num_query=1000, verbose=True)
+    dataset = SyntheticDataset(num_dims=100, train_size=50000, test_size=1000, neighbors_per_query=10, max_neighbor_dist=0.01)
+    # lsh = VanillaLSH(k=12, l=10, r=1, n_dims=dataset.dimension)
+    # lsh = AlphaLSH(k=1, l=15, r=1, n_dims=dataset.dimension)
+    lsh = MultiProbeLSH(k=12, l=5, r=1, n_dims=dataset.dimension)
+
+    evaluate_scheme(lsh, dataset, num_query=1000, verbose=True, num_perturbations=3)
+
+
     # calculate_average_projected_distance(dataset, num_query=1000)

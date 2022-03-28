@@ -105,6 +105,8 @@ class SyntheticDataset():
                  max_neighbor_dist,
                  radius=1):
 
+        self.dimension = num_dims
+
         num_train = train_size - (test_size * neighbors_per_query)
         assert num_train >= 0, "Size of train set must exceed number of artificially placed neighbors"
 
