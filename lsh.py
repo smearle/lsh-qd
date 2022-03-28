@@ -69,18 +69,19 @@ class pStableHash():
         # Then we generate a matrix of random offsets that is l by k
         self.B = np.random.random(size=(self.l, self.k)) * self.r
 
-    def new_hash(self, x):
+    def hash(self, x):
+        '''
+        Hashes a data point, obtaining a hash value for each of the l tables (based on its value under each of the k bands).
+        Returns the 'data index' of the data point as well as the l bucket IDs
+
+        Args:
+            x: the data point
+        '''
 
         all_bucket_ids = []
 
-        # First, we tile the data point into a matrix of size (l, k, n_dims)
-        # tiled_x = np.tile(x, (self.l, self.k, 1))
-
-        # (1, 1, n_dims)
-
-        # Now we compute the effective dot product between our data point and each random normal vector by doing an
-        # element-wise product and summing over the last dimension and add the offsets
-        # projected = np.multiply(self.A, x).sum(axis=2) + self.B
+        # This matrix multiplication broadcasts the query point so that we compute the its dot product with each random
+        # vector in self.A, before adding the result to the offsets in self.B
         projected = np.matmul(self.A, x) + self.B
 
         # Next, convert these projections to bucket indices by dividing by r and taking the floor
@@ -91,36 +92,6 @@ class pStableHash():
 
             # Add the data index to the current bucket
             self.tables[table_idx][table_bucket_id].append(self.cur_data_idx)
-            all_bucket_ids.append(table_bucket_id)
-
-        # Associate the bucket ids with the current data point
-        self.data_idx_to_bucket_ids[self.cur_data_idx] = all_bucket_ids
-        data_idx = self.cur_data_idx
-
-        # Increment the data index
-        self.cur_data_idx += 1
-
-        return data_idx, all_bucket_ids
-
-    def hash(self, x):
-        '''
-        Hashes a data point, obtaining a hash value for each of the l tables (based on its value under each of the k bands).
-        Returns the 'data index' of the data point as well as the l bucket IDs
-
-        Args:
-            x: the data point
-        '''
-        all_bucket_ids = []
-
-        # For each table, collect the k hash functions (one for each band)
-        for hash_idx, band_funcs in enumerate(self.hash_functions):
-
-            # Compute the data point's signature under those hash functions, and its corresponding bucket id
-            table_proj_values = np.array([fn(x) for fn in band_funcs])
-            table_bucket_id = tuple(np.floor(table_proj_values / self.r).astype(np.int32))
-
-            # Add the data index to the current bucket
-            self.tables[hash_idx][table_bucket_id].append(self.cur_data_idx)
             all_bucket_ids.append(table_bucket_id)
 
         # Associate the bucket ids with the current data point
@@ -152,7 +123,6 @@ class pStableHash():
 
     def _get_collision_freqs(self, y):
         '''
-
         For a query data point y, return a dictionary that maps from data indexes to the number of times that
         data point collides with the query point (an integer between 0 and l). 
 
@@ -162,20 +132,6 @@ class pStableHash():
         Args:
             y: a query point
         '''
-        collision_freqs = defaultdict(int)
-
-        for hash_idx, band_funcs in enumerate(self.hash_functions):
-
-            table_proj_values = np.array([fn(y) for fn in band_funcs])
-            table_bucket_id = tuple(np.floor(table_proj_values / self.r).astype(np.int32))
-
-            # Keep a count of number of collisions with each other item
-            for data_index in self.tables[hash_idx][table_bucket_id]:
-                collision_freqs[data_index] += 1
-
-        return collision_freqs
-
-    def new_get_collision_freqs(self, y):
         collision_freqs = defaultdict(int)
 
         projected = np.matmul(self.A, y) + self.B
@@ -215,7 +171,7 @@ class VanillaLSH(pStableHash):
             y: a query_point
         '''
 
-        collision_freqs = self.new_get_collision_freqs(y)
+        collision_freqs = self._get_collision_freqs(y)
         neighbor_idxs = list(collision_freqs.keys()) # the collision_freqs dict only includes elements that collide at least once
 
         return neighbor_idxs
@@ -255,7 +211,7 @@ class AlphaLSH(pStableHash):
         return neighbor_idxs
 
 
-class MultiProbeLsh(pStableHash):
+class MultiProbeLSH(pStableHash):
     '''
     TODO
     '''
@@ -264,22 +220,21 @@ class MultiProbeLsh(pStableHash):
 
     def query(self, y, num_perturbations):
 
-        bucket_ids = []
         negative_boundary_dists = []
         positive_boundary_dists = []
 
-        # Compute the bucket id of y under each of our l tables
-        for hash_idx, band_funcs in enumerate(self.hash_functions):
+        projected = np.matmul(self.A, y) + self.B
+        bucket_ids = np.floor(projected / self.r).astype(np.int32)
 
-            table_proj_values = np.array([fn(y) for fn in band_funcs])
-            table_bucket_id = np.floor(table_proj_values / self.r).astype(np.int32)
+        for table_idx, table_bucket_id in enumerate(bucket_ids):
+
+            table_proj_values = projected[table_idx]
 
             # Compute the distance from the query point to the positive and negative boundaries
             # of its interval, which will be used to determine the ordering of perturbation vectors
             table_negative_boundary_dists = table_proj_values - (table_bucket_id * self.r)
             table_positive_boundary_dists = self.r - table_negative_boundary_dists
 
-            bucket_ids.append(table_bucket_id)
             negative_boundary_dists.append(table_negative_boundary_dists)
             positive_boundary_dists.append(table_positive_boundary_dists)
 
@@ -480,7 +435,7 @@ if __name__ == "__main__":
 
     vanilla = VanillaLSH(k, l ,r, n_dims, seed)
     alpha = AlphaLSH(k, l ,r, n_dims, seed)
-    multi = MultiProbeLsh(k, l ,r, n_dims, seed)
+    multi = MultiProbeLSH(k, l ,r, n_dims, seed)
 
     for data_point in tqdm(train, desc="Hashing"):
         # multi.hash(data_point / 256)
