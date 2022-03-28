@@ -81,7 +81,7 @@ if __name__ == "__main__":
     from lsh import VanillaLSH
 
     dataset = ANNBenchmarkDataset("fashion-mnist", normalize=False)
-    lsh = VanillaLSH(k=55, l=100, r=15000, n_dims=dataset.dimension)
+    lsh = VanillaLSH(k=65, l=100, r=15000, n_dims=dataset.dimension)
 
     evaluate_scheme(lsh, dataset, num_query=1000, verbose=True)
     # calculate_average_projected_distance(dataset, num_query=1000)

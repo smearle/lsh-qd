@@ -120,6 +120,14 @@ class SyntheticDataset():
         neighbors = np.repeat(test_data, neighbors_per_query, axis=0) + neighbor_offsets
 
         self.train_set = np.concatenate([train_data, neighbors])
+        self.neighbor_idxs = np.empty((test_size, neighbors_per_query))
+
+        for query_idx in range(test_size):
+            query_neighbor_idxs = range(num_train + (query_idx * neighbors_per_query), 
+                                        num_train + (query_idx * neighbors_per_query) + neighbors_per_query)
+            self.neighbor_idxs[query_idx, :] = query_neighbor_idxs
+
+        self.neighbor_idxs = self.neighbor_idxs.astype(np.int32)
         self.test_set = test_data
 
 
@@ -130,5 +138,20 @@ if __name__ == "__main__":
 
     # d = ANNBenchmarkDataset("fashion-mnist", normalize=True)
     d = SyntheticDataset(100, 50000, 1000, 10, 0.01)
-    print(d.train_set[0])
-    # print([max(d.train_set[i]) for i in range(1000)])
+    # print(d.train_set[0])
+
+    query_idx = 100
+    query_point = d.test_set[query_idx]
+
+    dists = []
+    for neighbor_idx in d.neighbor_idxs[query_idx]:
+        neighbor = d.train_set[neighbor_idx]
+        dist = np.linalg.norm(query_point - neighbor)
+        dists.append(dist)
+
+    # for point in d.train_set:
+    #     dist = np.linalg.norm(query_point - point)
+    #     if dist < 1:
+    #         print(dist)
+
+    print("Average distance:", np.mean(dists))
