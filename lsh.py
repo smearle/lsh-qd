@@ -1,4 +1,5 @@
 import math
+import time
 import heapq
 import numpy as np
 from collections import defaultdict
@@ -162,17 +163,29 @@ class VanillaLSH(pStableHash):
     def __init__(self, k, l, r, n_dims, seed=42):
         super().__init__(k, l, r, n_dims, seed)
 
-    def query(self, y):
+        self.query_total_times = []
+        self.query_scan_times = []
+
+    def query(self, y, timed=False):
         '''
         Returns the data indices of each previously-hashed item which collides with query point in at least one
         of the l tables
 
         Args:
             y: a query_point
+            timed: a flag for whether the time taken to compute steps of the querying process should be recorded
         '''
 
+        if timed: overall_start = time.perf_counter()
         collision_freqs = self._get_collision_freqs(y)
+
+        if timed: scan_start = time.perf_counter()
         neighbor_idxs = list(collision_freqs.keys()) # the collision_freqs dict only includes elements that collide at least once
+
+        if timed:
+            end_time = time.perf_counter()
+            self.query_total_times.append(end_time - overall_start)
+            self.query_scan_times.append(end_time - scan_start)
 
         return neighbor_idxs
 
@@ -194,7 +207,11 @@ class AlphaLSH(pStableHash):
     def __init__(self, k, l, r, n_dims, seed=42):
         super().__init__(k, l, r, n_dims, seed)
 
-    def query(self, y, alpha=1):
+        self.query_total_times = []
+        self.query_scan_times = []
+
+
+    def query(self, y, alpha=1, timed=False):
         '''
         Returns the data indices of each previously-hashed item which collides with the query point in at least
         alpha of the l tables
@@ -203,10 +220,19 @@ class AlphaLSH(pStableHash):
             y: a query point
             alpha (int): minimum number of tables in which an item must collide with x in order l be considered a
                 neighbor
+            timed: a flag for whether the time taken to compute steps of the querying process should be recorded
         '''
 
+        if timed: overall_start = time.perf_counter()
         collision_freqs = self._get_collision_freqs(y)
+
+        if timed: scan_start = time.perf_counter()
         neighbor_idxs = [idx for idx, freq in collision_freqs.items() if freq >= alpha]
+        
+        if timed:
+            end_time = time.perf_counter()
+            self.query_total_times.append(end_time - overall_start)
+            self.query_scan_times.append(end_time - scan_start)
 
         return neighbor_idxs
 
