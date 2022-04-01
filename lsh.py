@@ -372,6 +372,144 @@ class MultiProbeLSH(pStableHash):
 
         return neighbors
 
+class AlphaMultiProbeLSH(pStableHash):
+    '''
+    TODO
+    '''
+    def __init__(self, k, l, r, n_dims, seed=42):
+        super().__init__(k, l, r, n_dims, seed)
+
+    def query(self, y, num_perturbations, alpha=1):
+
+        negative_boundary_dists = []
+        positive_boundary_dists = []
+
+        projected = np.matmul(self.A, y) + self.B
+        bucket_ids = np.floor(projected / self.r).astype(np.int32)
+
+        for table_idx, table_bucket_id in enumerate(bucket_ids):
+
+            table_proj_values = projected[table_idx]
+
+            # Compute the distance from the query point to the positive and negative boundaries
+            # of its interval, which will be used to determine the ordering of perturbation vectors
+            table_negative_boundary_dists = table_proj_values - (table_bucket_id * self.r)
+            table_positive_boundary_dists = self.r - table_negative_boundary_dists
+
+            negative_boundary_dists.append(table_negative_boundary_dists)
+            positive_boundary_dists.append(table_positive_boundary_dists)
+
+        negative_boundary_dists = np.array(negative_boundary_dists)
+        positive_boundary_dists = np.array(positive_boundary_dists)
+
+        # This matrix (l x 2k) stores all of the distances from the query point to its interval boundaries.
+        # X[i, j] represents the distance from the query point to the boundary corresponding to pi_j in table i
+        X = np.concatenate([negative_boundary_dists, positive_boundary_dists], axis=1)
+
+        # In the paper, each pi is a tuple of the form (i, delta), representing a band index and
+        # an actual perturbation. Each entry in a row of X, above, represents one such pi (there are 2k
+        # for each row)
+        sorted_pi_indices = np.argsort(X, axis=1)
+
+        # Now we convert from the indices of each pi tuple to the actual corresponding band index and
+        # perturbation, which will be used later to actually access the neighboring buckets
+        sorted_band_idxs = sorted_pi_indices % self.k
+        sorted_perturbations = (sorted_pi_indices // self.k * 2) - 1
+
+        # Calculate the score associated with a particular table and perturbation set, defined as the sum
+        # of the squared distances of each perturbation in the set
+        def score_perturbation_set(table_idx, pi_idxs):
+            return np.power(X[table_idx][list(pi_idxs)], 2).sum()
+
+        # Create a min-heap to store all of our potential perturbations. Each entry in the heap will look
+        # like (score, table_index, perturbation_set), and each entry in the perturbation set is a "pi index"
+        # (an element in {0, ..., 2k-1}) which represents a specific band index and perturbation
+        heap = []
+        for table_idx in range(self.l):
+            perturbation_set = {0}
+            score = score_perturbation_set(table_idx, perturbation_set)
+            heap.append((score, table_idx, perturbation_set))
+
+        heapq.heapify(heap)
+
+        def shift_perturbation_set(pi_idxs):
+            copy = perturbation_set.copy()
+            max_val = max(copy)
+
+            copy.remove(max_val)
+            copy.add(max_val + 1)
+
+            return copy
+
+        def expand_perturbation_set(pi_idxs):
+            copy = perturbation_set.copy()
+            max_val = max(copy)
+
+            copy.add(max_val + 1)
+
+            return copy
+
+        def validate_perturbation_set(pi_idxs):
+            for idx in pi_idxs:
+                if (2 * self.k) - 1 - idx in pi_idxs:
+                    return False
+
+            return True
+
+
+        assert num_perturbations < (2**self.k) * self.l, "Number of perturbations was too high"
+
+
+        # Generate perturbation sets in ascending order of score using the algorithm outlined in the 
+        # paper, which iteratively expands / shifts existing perturbation sets (and discards invalid sets)
+        actual_perturbations = []
+        while len(actual_perturbations) < num_perturbations:
+            score, table_idx, pi_idxs = heapq.heappop(heap)
+
+            if validate_perturbation_set(pi_idxs):
+                actual_perturbations.append((table_idx, pi_idxs))
+
+            shifted_perturbation_set = shift_perturbation_set(pi_idxs)
+            shifted_score = score_perturbation_set(table_idx, shifted_perturbation_set)
+            heapq.heappush(heap, (shifted_score, table_idx, shifted_perturbation_set))
+
+            expanded_perturbation_set = expand_perturbation_set(pi_idxs)
+            expanded_score = score_perturbation_set(table_idx, expanded_perturbation_set)
+            heapq.heappush(heap, (expanded_score, table_idx, expanded_perturbation_set))
+
+
+        # Now we actually collect the near neighbors by constructing the corresponding perturbation vector out of each
+        # of the previously returned perturbation sets. To do this, we map from each pi index to the corresponding band
+        # index and perturbation, leaving all of the other perturbations as 0, and add that to the query's bucket ID for
+        # the particular table associated with that perturbation set. This gives us a new bucket ID, and we collect all
+        # of the data indices that fall into that bucket in that table. Of course, we also include all of the data indices
+        # in the actual bucket of the query item
+        neighbor_collision_counts = defaultdict(int)
+        for table_idx, perturbation_set in actual_perturbations:
+            query_bucket_id = bucket_ids[table_idx] # this is a k-dimensional vector of intergers representing intervals
+
+            band_idxs = sorted_band_idxs[list(perturbation_set)] 
+            perturbations = sorted_perturbations[list(perturbation_set)]
+
+            perturbation_vector = np.zeros(self.k)
+            perturbation_vector[band_idxs] += perturbations
+
+            perturbed_bucket_id = tuple((query_bucket_id + perturbation_vector).astype(np.int32))
+            for data_index in self.tables[table_idx][perturbed_bucket_id]:
+                neighbor_collision_counts[data_index] += 1
+
+        
+        # Finally, we collect all of the neighbors in the query's actual buckets
+        for table_idx in range(self.l):
+            query_bucket_id = tuple(bucket_ids[table_idx].astype(np.int32))
+            for data_index in self.tables[table_idx][query_bucket_id]:
+                neighbor_collision_counts[data_index] += 1
+
+        # Filter based on the number of collisions
+        neighbors = [data_idx for data_idx, freq in neighbor_collision_counts.items() if freq >= alpha]
+
+        return neighbors
+
 if __name__ == "__main__":
     import h5py
     import math

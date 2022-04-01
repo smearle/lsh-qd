@@ -3,7 +3,7 @@ from tqdm import tqdm
 from multiprocessing import Pool
 # from pathos.multiprocessing import ProcessingPool as Pool\
 
-from lsh import VanillaLSH, AlphaLSH, MultiProbeLSH
+from lsh import VanillaLSH, AlphaLSH, MultiProbeLSH, AlphaMultiProbeLSH
 from datasets import ANNBenchmarkDataset, SyntheticDataset
 
 
@@ -80,7 +80,7 @@ def calculate_average_projected_distance(dataset, num_projections=100, num_query
 if __name__ == "__main__":
     
 
-    # dataset = ANNBenchmarkDataset("fashion-mnist", normalize=False)
+    dataset = ANNBenchmarkDataset("fashion-mnist", normalize=False)
     # calculate_average_projected_distance(dataset, num_query=1000)
 
     # lsh = MultiProbeLSH(k=20, l=20, r=500, n_dims=dataset.dimension)
@@ -89,18 +89,23 @@ if __name__ == "__main__":
     # lsh = VanillaLSH(k=65, l=100, r=15000, n_dims=dataset.dimension)
     # lsh = AlphaLSH(k=25, l=150, r=15000, n_dims=dataset.dimension)
     # lsh = MultiProbeLSH(k=75, l=50, r=10000, n_dims=dataset.dimension)
+    lsh = AlphaMultiProbeLSH(k=30, l=40, r=10000, n_dims=dataset.dimension)
+    evaluate_scheme(lsh, dataset, num_query=100, verbose=True, num_perturbations=25, alpha=5)
 
-    dataset = SyntheticDataset(num_dims=100, train_size=50000, test_size=1000, neighbors_per_query=10, max_neighbor_dist=0.01)
+
+    # dataset = SyntheticDataset(num_dims=100, train_size=50000, test_size=1000, neighbors_per_query=10, max_neighbor_dist=0.01)
     # lsh = VanillaLSH(k=12, l=10, r=1, n_dims=dataset.dimension)
-    lsh = AlphaLSH(k=1, l=15, r=1, n_dims=dataset.dimension)
+    # lsh = AlphaLSH(k=1, l=15, r=1, n_dims=dataset.dimension)
     # lsh = MultiProbeLSH(k=12, l=3, r=1, n_dims=dataset.dimension)
+    # lsh = AlphaMultiProbeLSH(k=3, l=3, r=1, n_dims=dataset.dimension)
 
     # evaluate_scheme(lsh, dataset, num_query=1000, verbose=True, timed=True)
-    evaluate_scheme(lsh, dataset, num_query=1000, verbose=True, alpha=13, timed=True)
-    # evaluate_scheme(lsh, dataset, num_query=100, verbose=True, num_perturbations=25)
+    # evaluate_scheme(lsh, dataset, num_query=1000, verbose=True, alpha=13, timed=True)
+    # evaluate_scheme(lsh, dataset, num_query=100, verbose=True, num_perturbations=2)
+    # evaluate_scheme(lsh, dataset, num_query=100, verbose=True, num_perturbations=2, alpha=3)
 
-    print("Average query time:", np.mean(lsh.query_total_times))
-    print("Average scan time: ", np.mean(lsh.query_scan_times))
-    print("Proportion spent scanning:", (np.array(lsh.query_scan_times) / np.array(lsh.query_total_times)).mean())
+    # print("Average query time:", np.mean(lsh.query_total_times))
+    # print("Average scan time: ", np.mean(lsh.query_scan_times))
+    # print("Proportion spent scanning:", (np.array(lsh.query_scan_times) / np.array(lsh.query_total_times)).mean())
 
     # calculate_average_projected_distance(dataset, num_query=1000)
