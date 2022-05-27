@@ -244,13 +244,27 @@ class MultiProbeLSH(pStableHash):
     def __init__(self, k, l, r, n_dims, seed=42):
         super().__init__(k, l, r, n_dims, seed)
 
-    def query(self, y, num_perturbations):
+        self.query_total_times = [] # amount of time it takes to perform an entire single query operation
+        self.query_hash_times = [] # amount of time it takes to hash the query point into all l tables and k bands
+        self.query_set_construction_times = [] # amount of time it takes to construct the perturbation sets
+        self.query_scan_times = [] # amount of time it takes to ultimately determine all the collisions with our query
+        self.query_num_perturbed_bucket_collisions = [] # the raw number of collisions in each of the buckets we get from a perturbation
+        self.query_num_original_bucket_collisions = [] # the raw number of collisions in each of the buckets without any perturbations
+
+    def query(self, y, num_perturbations, timed=False):
+
+        if timed:
+            overall_start_time = time.perf_counter()
 
         negative_boundary_dists = []
         positive_boundary_dists = []
 
         projected = np.matmul(self.A, y) + self.B
         bucket_ids = np.floor(projected / self.r).astype(np.int32)
+
+        if timed: 
+            set_construction_start_time = timer.perf_counter()
+            self.query_hash_times.append(set_construction_start_time - overall_start_time)
 
         for table_idx, table_bucket_id in enumerate(bucket_ids):
 
@@ -342,6 +356,9 @@ class MultiProbeLSH(pStableHash):
             expanded_score = score_perturbation_set(table_idx, expanded_perturbation_set)
             heapq.heappush(heap, (expanded_score, table_idx, expanded_perturbation_set))
 
+        if timed:
+            scan_start_time = timer.perf_counter()
+            self.query_set_construction_times.append(scan_start_time - set_construction_start_time)
 
         # Now we actually collect the near neighbors by constructing the corresponding perturbation vector out of each
         # of the previously returned perturbation sets. To do this, we map from each pi index to the corresponding band
@@ -360,6 +377,10 @@ class MultiProbeLSH(pStableHash):
             perturbation_vector[band_idxs] += perturbations
 
             perturbed_bucket_id = tuple((query_bucket_id + perturbation_vector).astype(np.int32))
+
+            if timed:
+                self.query_num_perturbed_bucket_collisions.append(len(self.tables[table_idx[perturbed_bucket_id]]))
+
             for data_index in self.tables[table_idx][perturbed_bucket_id]:
                 neighbors.add(data_index)
 
@@ -367,8 +388,17 @@ class MultiProbeLSH(pStableHash):
         # Finally, we collect all of the neighbors in the query's actual buckets
         for table_idx in range(self.l):
             query_bucket_id = tuple(bucket_ids[table_idx].astype(np.int32))
+
+            if timed:
+                self.query_num_perturbed_bucket_collisions.append(len(self.tables[table_idx[query_bucket_id]]))
+
             for data_index in self.tables[table_idx][query_bucket_id]:
                 neighbors.add(data_index)
+
+        if timed:
+            end_time = timer.perf_counter()
+            self.query_scan_times.append(end_time - scan_start_time)
+            self.query_total_times.append(overall_start_time - end_time)
 
         return neighbors
 
@@ -379,13 +409,27 @@ class AlphaMultiProbeLSH(pStableHash):
     def __init__(self, k, l, r, n_dims, seed=42):
         super().__init__(k, l, r, n_dims, seed)
 
-    def query(self, y, num_perturbations, alpha=1):
+        self.query_total_times = [] # amount of time it takes to perform an entire single query operation
+        self.query_hash_times = [] # amount of time it takes to hash the query point into all l tables and k bands
+        self.query_set_construction_times = [] # amount of time it takes to construct the perturbation sets
+        self.query_scan_times = [] # amount of time it takes to ultimately determine all the collisions with our query
+        self.query_num_perturbed_bucket_collisions = [] # the raw number of collisions in each of the buckets we get from a perturbation
+        self.query_num_original_bucket_collisions = [] # the raw number of collisions in each of the buckets without any perturbations
+
+    def query(self, y, num_perturbations, alpha=1, timed=False):
+
+        if timed:
+            overall_start_time = time.perf_counter()
 
         negative_boundary_dists = []
         positive_boundary_dists = []
 
         projected = np.matmul(self.A, y) + self.B
         bucket_ids = np.floor(projected / self.r).astype(np.int32)
+
+        if timed: 
+            set_construction_start_time = timer.perf_counter()
+            self.query_hash_times.append(set_construction_start_time - overall_start_time)
 
         for table_idx, table_bucket_id in enumerate(bucket_ids):
 
@@ -477,6 +521,9 @@ class AlphaMultiProbeLSH(pStableHash):
             expanded_score = score_perturbation_set(table_idx, expanded_perturbation_set)
             heapq.heappush(heap, (expanded_score, table_idx, expanded_perturbation_set))
 
+        if timed:
+            scan_start_time = timer.perf_counter()
+            self.query_set_construction_times.append(scan_start_time - set_construction_start_time)
 
         # Now we actually collect the near neighbors by constructing the corresponding perturbation vector out of each
         # of the previously returned perturbation sets. To do this, we map from each pi index to the corresponding band
@@ -495,6 +542,10 @@ class AlphaMultiProbeLSH(pStableHash):
             perturbation_vector[band_idxs] += perturbations
 
             perturbed_bucket_id = tuple((query_bucket_id + perturbation_vector).astype(np.int32))
+
+            if timed:
+                self.query_num_perturbed_bucket_collisions.append(len(self.tables[table_idx[perturbed_bucket_id]]))
+
             for data_index in self.tables[table_idx][perturbed_bucket_id]:
                 neighbor_collision_counts[data_index] += 1
 
@@ -502,11 +553,20 @@ class AlphaMultiProbeLSH(pStableHash):
         # Finally, we collect all of the neighbors in the query's actual buckets
         for table_idx in range(self.l):
             query_bucket_id = tuple(bucket_ids[table_idx].astype(np.int32))
+
+            if timed:
+                self.query_num_perturbed_bucket_collisions.append(len(self.tables[table_idx[query_bucket_id]]))
+
             for data_index in self.tables[table_idx][query_bucket_id]:
                 neighbor_collision_counts[data_index] += 1
 
         # Filter based on the number of collisions
         neighbors = [data_idx for data_idx, freq in neighbor_collision_counts.items() if freq >= alpha]
+
+        if timed:
+            end_time = timer.perf_counter()
+            self.query_scan_times.append(end_time - scan_start_time)
+            self.query_total_times.append(overall_start_time - end_time)
 
         return neighbors
 
