@@ -1,0 +1,8 @@
+Experiment:
+need to determine what percentage of query time is spent doing the hash of the query item, vs scanning over potential collisions
+AlphaMultiProbeLSH reduces the number of bands, which should reduce the hashing time, but it comes at the expense of more potential collisions
+Need to see what kind of data dimension is needed before those start to outweight each other
+-Is AlphLSH beneficial when you have really high dimensional data?
+
+-check out image deduplication: there's usually one very close data point and then the rest are quite far away from the query point
+-

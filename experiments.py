@@ -77,10 +77,31 @@ def calculate_average_projected_distance(dataset, num_projections=100, num_query
     avg_distance = np.mean(all_distances)
     print("Average projected distance from query point to neighbor:", avg_distance)
 
+
+def report_query(lsh):
+    avg_overall_time = np.mean(lsh.query_total_times)
+    avg_hash_time = np.mean(lsh.query_hash_times)
+    avg_set_const_time = np.mean(lsh.query_set_construction_times)
+    avg_scan_time = np.mean(lsh.query_scan_times)
+    avg_pert_collisions = np.mean(lsh.query_num_perturbed_bucket_collisions)
+    avg_orig_collisions = np.mean(lsh.query_num_original_bucket_collisions)
+
+    print("=" * 100)
+    print(f"Query Report for {type(lsh)} Type LSH (l = {lsh.l}, k = {lsh.k})")
+    print(f"Average overall query time: {avg_overall_time}")
+    print(f"Average hash time: {'%.4e' % avg_hash_time} ({'%.2f' % (100 * avg_hash_time / avg_overall_time)}%)")
+    print(f"Average set construction time: {'%.4e' % avg_set_const_time} ({'%.2f' % (100 * avg_set_const_time / avg_overall_time)}%)")
+    print(f"Average scan time: {'%.4e' % avg_scan_time} ({'%.2f' % (100 * avg_scan_time / avg_overall_time)}%)")
+    print(f"Average number of collisions in perturbed buckets: {'%.2f' % avg_pert_collisions}")
+    print(f"Average number of collisions in original buckets: {'%.2f' % avg_orig_collisions}")
+    print("=" * 100)
+
+
+
 if __name__ == "__main__":
     
 
-    dataset = ANNBenchmarkDataset("fashion-mnist", normalize=False)
+    # dataset = ANNBenchmarkDataset("fashion-mnist", normalize=False)
     # calculate_average_projected_distance(dataset, num_query=1000)
 
     # lsh = MultiProbeLSH(k=20, l=20, r=500, n_dims=dataset.dimension)
@@ -89,23 +110,30 @@ if __name__ == "__main__":
     # lsh = VanillaLSH(k=65, l=100, r=15000, n_dims=dataset.dimension)
     # lsh = AlphaLSH(k=25, l=150, r=15000, n_dims=dataset.dimension)
     # lsh = MultiProbeLSH(k=75, l=50, r=10000, n_dims=dataset.dimension)
-    lsh = AlphaMultiProbeLSH(k=30, l=40, r=10000, n_dims=dataset.dimension)
-    evaluate_scheme(lsh, dataset, num_query=100, verbose=True, num_perturbations=25, alpha=5)
+    # lsh = AlphaMultiProbeLSH(k=30, l=40, r=10000, n_dims=dataset.dimension)
+    # evaluate_scheme(lsh, dataset, num_query=100, verbose=True, num_perturbations=25, alpha=5)
 
 
-    # dataset = SyntheticDataset(num_dims=100, train_size=50000, test_size=1000, neighbors_per_query=10, max_neighbor_dist=0.01)
+    
     # lsh = VanillaLSH(k=12, l=10, r=1, n_dims=dataset.dimension)
     # lsh = AlphaLSH(k=1, l=15, r=1, n_dims=dataset.dimension)
-    # lsh = MultiProbeLSH(k=12, l=3, r=1, n_dims=dataset.dimension)
-    # lsh = AlphaMultiProbeLSH(k=3, l=3, r=1, n_dims=dataset.dimension)
+    
 
     # evaluate_scheme(lsh, dataset, num_query=1000, verbose=True, timed=True)
     # evaluate_scheme(lsh, dataset, num_query=1000, verbose=True, alpha=13, timed=True)
-    # evaluate_scheme(lsh, dataset, num_query=100, verbose=True, num_perturbations=2)
-    # evaluate_scheme(lsh, dataset, num_query=100, verbose=True, num_perturbations=2, alpha=3)
+    
 
-    # print("Average query time:", np.mean(lsh.query_total_times))
-    # print("Average scan time: ", np.mean(lsh.query_scan_times))
-    # print("Proportion spent scanning:", (np.array(lsh.query_scan_times) / np.array(lsh.query_total_times)).mean())
+    
 
     # calculate_average_projected_distance(dataset, num_query=1000)
+
+
+    dataset = SyntheticDataset(num_dims=100, train_size=50000, test_size=1000, neighbors_per_query=10, max_neighbor_dist=0.01)
+    multi_lsh = MultiProbeLSH(k=12, l=3, r=1, n_dims=dataset.dimension)
+    alpha_multi_lsh = AlphaMultiProbeLSH(k=3, l=3, r=1, n_dims=dataset.dimension)
+
+    evaluate_scheme(multi_lsh, dataset, num_query=500, verbose=True, num_perturbations=2, timed=True)
+    report_query(multi_lsh)
+    
+    evaluate_scheme(alpha_multi_lsh, dataset, num_query=500, verbose=True, num_perturbations=2, alpha=3, timed=True)
+    report_query(alpha_multi_lsh)

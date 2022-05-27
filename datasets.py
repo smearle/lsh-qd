@@ -95,7 +95,7 @@ class SyntheticDataset():
         test_size: the size of the test set
         neighbors_per_query: the number of artificially placed neighbors for each query
         max_neighbor_dist: the radius of the ball around each query point where neighbors are placed
-        radius: the radius of the ball within in which all train / query points are placed
+        radius: the radius of the ball within which all train / query points are placed
     '''
     def __init__(self,
                  num_dims,
